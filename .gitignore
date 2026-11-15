@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.*
+!.env.example
+packages/db/src/generated/
+dist/
+.next/
+*.log
+.DS_Store

@@ -1,0 +1,14 @@
+{
+  "name": "rp-chile",
+  "private": true,
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "db:generate": "npm run generate -w @rp-chile/db",
+    "db:migrate": "npm run migrate -w @rp-chile/db",
+    "db:studio": "npm run studio -w @rp-chile/db",
+    "bot:dev": "npm run dev -w @rp-chile/bot",
+    "bot:start": "npm run start -w @rp-chile/bot",
+    "bot:deploy-commands": "npm run deploy-commands -w @rp-chile/bot"
+  },
+  "engines": { "node": ">=20.19" }
+}

@@ -1,0 +1,431 @@
+// Esquema compartido por el bot (discord.js) y la web (Next.js).
+// Prisma 7: la URL de conexión NO va aquí, va en prisma.config.ts.
+// Montos en CLP como BigInt (pesos enteros, sin decimales).
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────── ENUMS ─────────────────────────
+
+enum RolPlataforma {
+  JUGADOR
+  STAFF
+  ADMIN
+}
+
+enum EstadoVerificacion {
+  PENDIENTE
+  VERIFICADO
+  RECHAZADO
+  SUSPENDIDO
+}
+
+enum EstadoDocumento {
+  VIGENTE
+  VENCIDO
+  SUSPENDIDO
+  REVOCADO
+}
+
+enum TipoDocumento {
+  LICENCIA_CONDUCIR
+  PORTE_ARMA
+  PASAPORTE
+  CERTIFICADO_ANTECEDENTES
+  OTRO
+}
+
+enum TipoInstitucion {
+  GOBIERNO
+  MUNICIPAL
+  JUDICIAL
+  FISCALIA
+  DEFENSORIA
+  POLICIAL
+  SALUD
+  BANCARIA
+  OTRA
+}
+
+enum TipoCuenta {
+  CORRIENTE
+  VISTA
+  AHORRO
+  EMPRESA
+}
+
+enum EstadoCuenta {
+  ACTIVA
+  CONGELADA
+  CERRADA
+}
+
+enum TipoTransaccion {
+  TRANSFERENCIA
+  DEPOSITO
+  RETIRO
+  PAGO_MULTA
+  SUELDO
+  AJUSTE
+}
+
+enum TipoCaso {
+  PENAL
+  CIVIL
+  FAMILIA
+  ADMINISTRATIVO
+}
+
+enum EstadoCaso {
+  ABIERTO
+  EN_INVESTIGACION
+  EN_JUICIO
+  CERRADO
+  ARCHIVADO
+}
+
+enum RolCaso {
+  IMPUTADO
+  VICTIMA
+  TESTIGO
+  QUERELLANTE
+  FISCAL
+  DEFENSOR
+  JUEZ
+}
+
+enum EstadoMulta {
+  PENDIENTE
+  PAGADA
+  ANULADA
+}
+
+enum CategoriaTicket {
+  SOPORTE
+  REPORTE
+  APELACION
+  OTRO
+}
+
+enum EstadoTicket {
+  ABIERTO
+  EN_ATENCION
+  CERRADO
+}
+
+enum TipoPostulacion {
+  WHITELIST
+  INSTITUCION
+  STAFF
+}
+
+enum EstadoPostulacion {
+  PENDIENTE
+  EN_REVISION
+  APROBADA
+  RECHAZADA
+}
+
+// ───────────────── USUARIOS Y VERIFICACIÓN ─────────────────
+
+model Usuario {
+  id             String             @id @default(cuid())
+  discordId      String             @unique
+  username       String
+  avatar         String?
+  rol            RolPlataforma      @default(JUGADOR)
+  verificacion   EstadoVerificacion @default(PENDIENTE)
+  verificadoEn   DateTime?
+  verificadoPorId String?
+  verificadoPor  Usuario?           @relation("Verificaciones", fields: [verificadoPorId], references: [id])
+  verificados    Usuario[]          @relation("Verificaciones")
+  creadoEn       DateTime           @default(now())
+  actualizadoEn  DateTime           @updatedAt
+
+  personajes             Personaje[]
+  ticketsCreados         Ticket[]      @relation("TicketsCreados")
+  ticketsAsignados       Ticket[]      @relation("TicketsAsignados")
+  postulaciones          Postulacion[] @relation("PostulacionesEnviadas")
+  postulacionesRevisadas Postulacion[] @relation("PostulacionesRevisadas")
+  casosCreados           Caso[]
+  auditorias             Auditoria[]
+
+  @@map("usuarios")
+}
+
+// ───────────────────── PERSONAJES Y DOCUMENTOS ─────────────────────
+
+model Personaje {
+  id              String   @id @default(cuid())
+  usuarioId       String
+  usuario         Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  nombres         String
+  apellidos       String
+  rut             String   @unique // RUT ficticio del RP, ej: 21.345.678-9
+  fechaNacimiento DateTime
+  nacionalidad    String   @default("Chilena")
+  activo          Boolean  @default(true)
+  creadoEn        DateTime @default(now())
+  actualizadoEn   DateTime @updatedAt
+
+  cedula          Cedula?
+  documentos      Documento[]
+  cuentas         CuentaBancaria[]
+  cargos          Funcionario[]
+  participaciones CasoParticipante[]
+  multasRecibidas Multa[]            @relation("MultasRecibidas")
+  multasEmitidas  Multa[]            @relation("MultasEmitidas")
+  antecedentes    Antecedente[]
+
+  @@index([usuarioId])
+  @@map("personajes")
+}
+
+model Cedula {
+  id          String          @id @default(cuid())
+  personajeId String          @unique
+  personaje   Personaje       @relation(fields: [personajeId], references: [id], onDelete: Cascade)
+  numeroSerie String          @unique
+  emitidaEn   DateTime        @default(now())
+  venceEn     DateTime
+  estado      EstadoDocumento @default(VIGENTE)
+
+  @@map("cedulas")
+}
+
+model Documento {
+  id          String          @id @default(cuid())
+  personajeId String
+  personaje   Personaje       @relation(fields: [personajeId], references: [id], onDelete: Cascade)
+  tipo        TipoDocumento
+  numero      String          @unique
+  detalle     Json? // ej: clase de licencia, modelo de arma
+  emitidoEn   DateTime        @default(now())
+  venceEn     DateTime?
+  estado      EstadoDocumento @default(VIGENTE)
+
+  @@index([personajeId, tipo])
+  @@map("documentos")
+}
+
+// ───────────────────── INSTITUCIONES ─────────────────────
+
+model Institucion {
+  id            String          @id @default(cuid())
+  nombre        String          @unique
+  slug          String          @unique // para la URL del portal: /instituciones/fiscalia
+  tipo          TipoInstitucion
+  descripcion   String?
+  discordRoleId String?
+  activa        Boolean         @default(true)
+
+  cargos        Cargo[]
+  casos         Caso[]
+  postulaciones Postulacion[]
+
+  @@map("instituciones")
+}
+
+model Cargo {
+  id            String      @id @default(cuid())
+  institucionId String
+  institucion   Institucion @relation(fields: [institucionId], references: [id], onDelete: Cascade)
+  nombre        String
+  nivel         Int         @default(0) // jerarquía: mayor número = mayor rango
+  sueldo        BigInt      @default(0)
+  permisos      String[] // ej: ["casos:crear", "multas:emitir"]
+  discordRoleId String?
+
+  funcionarios Funcionario[]
+
+  @@unique([institucionId, nombre])
+  @@map("cargos")
+}
+
+model Funcionario {
+  id          String    @id @default(cuid())
+  personajeId String
+  personaje   Personaje @relation(fields: [personajeId], references: [id], onDelete: Cascade)
+  cargoId     String
+  cargo       Cargo     @relation(fields: [cargoId], references: [id])
+  desde       DateTime  @default(now())
+  hasta       DateTime?
+  activo      Boolean   @default(true)
+
+  @@index([personajeId, activo])
+  @@index([cargoId])
+  @@map("funcionarios")
+}
+
+// ───────────────────── BANCO ─────────────────────
+
+model CuentaBancaria {
+  id          String       @id @default(cuid())
+  personajeId String
+  personaje   Personaje    @relation(fields: [personajeId], references: [id], onDelete: Cascade)
+  numero      String       @unique
+  tipo        TipoCuenta   @default(VISTA)
+  saldo       BigInt       @default(0)
+  estado      EstadoCuenta @default(ACTIVA)
+  creadaEn    DateTime     @default(now())
+
+  salidas  Transaccion[] @relation("CuentaOrigen")
+  entradas Transaccion[] @relation("CuentaDestino")
+
+  @@index([personajeId])
+  @@map("cuentas_bancarias")
+}
+
+model Transaccion {
+  id        String          @id @default(cuid())
+  tipo      TipoTransaccion
+  monto     BigInt
+  glosa     String?
+  origenId  String? // null en depósitos/sueldos/ajustes
+  origen    CuentaBancaria? @relation("CuentaOrigen", fields: [origenId], references: [id])
+  destinoId String? // null en retiros
+  destino   CuentaBancaria? @relation("CuentaDestino", fields: [destinoId], references: [id])
+  creadaEn  DateTime        @default(now())
+
+  multa Multa?
+
+  @@index([origenId])
+  @@index([destinoId])
+  @@map("transacciones")
+}
+
+// ───────────────── CASOS, MULTAS Y ANTECEDENTES ─────────────────
+
+model Caso {
+  id            String       @id @default(cuid())
+  codigo        String       @unique // RIT/RUC del caso, ej: 240108-2026
+  titulo        String
+  descripcion   String?      @db.Text
+  tipo          TipoCaso     @default(PENAL)
+  estado        EstadoCaso   @default(ABIERTO)
+  institucionId String?
+  institucion   Institucion? @relation(fields: [institucionId], references: [id])
+  creadoPorId   String
+  creadoPor     Usuario      @relation(fields: [creadoPorId], references: [id])
+  creadoEn      DateTime     @default(now())
+  actualizadoEn DateTime     @updatedAt
+  cerradoEn     DateTime?
+
+  participantes CasoParticipante[]
+  multas        Multa[]
+  antecedentes  Antecedente[]
+
+  @@index([estado])
+  @@map("casos")
+}
+
+model CasoParticipante {
+  id          String    @id @default(cuid())
+  casoId      String
+  caso        Caso      @relation(fields: [casoId], references: [id], onDelete: Cascade)
+  personajeId String
+  personaje   Personaje @relation(fields: [personajeId], references: [id])
+  rol         RolCaso
+
+  @@unique([casoId, personajeId, rol])
+  @@index([personajeId])
+  @@map("caso_participantes")
+}
+
+model Multa {
+  id               String       @id @default(cuid())
+  personajeId      String // quien recibe la multa
+  personaje        Personaje    @relation("MultasRecibidas", fields: [personajeId], references: [id])
+  emisorId         String // personaje funcionario que la cursa
+  emisor           Personaje    @relation("MultasEmitidas", fields: [emisorId], references: [id])
+  casoId           String?
+  caso             Caso?        @relation(fields: [casoId], references: [id])
+  motivo           String
+  monto            BigInt
+  estado           EstadoMulta  @default(PENDIENTE)
+  emitidaEn        DateTime     @default(now())
+  pagadaEn         DateTime?
+  transaccionPagoId String?     @unique
+  transaccionPago  Transaccion? @relation(fields: [transaccionPagoId], references: [id])
+
+  @@index([personajeId, estado])
+  @@map("multas")
+}
+
+model Antecedente {
+  id          String    @id @default(cuid())
+  personajeId String
+  personaje   Personaje @relation(fields: [personajeId], references: [id], onDelete: Cascade)
+  casoId      String?
+  caso        Caso?     @relation(fields: [casoId], references: [id])
+  descripcion String
+  vigente     Boolean   @default(true)
+  registradoEn DateTime @default(now())
+  expiraEn    DateTime?
+
+  @@index([personajeId, vigente])
+  @@map("antecedentes")
+}
+
+// ───────────────── TICKETS Y POSTULACIONES ─────────────────
+
+model Ticket {
+  id             String          @id @default(cuid())
+  numero         Int             @unique @default(autoincrement())
+  categoria      CategoriaTicket @default(SOPORTE)
+  asunto         String
+  estado         EstadoTicket    @default(ABIERTO)
+  canalDiscordId String?         @unique
+  usuarioId      String
+  usuario        Usuario         @relation("TicketsCreados", fields: [usuarioId], references: [id])
+  asignadoAId    String?
+  asignadoA      Usuario?        @relation("TicketsAsignados", fields: [asignadoAId], references: [id])
+  transcripcion  String?         @db.Text
+  creadoEn       DateTime        @default(now())
+  cerradoEn      DateTime?
+
+  @@index([estado])
+  @@map("tickets")
+}
+
+model Postulacion {
+  id            String            @id @default(cuid())
+  tipo          TipoPostulacion
+  usuarioId     String
+  usuario       Usuario           @relation("PostulacionesEnviadas", fields: [usuarioId], references: [id])
+  institucionId String?
+  institucion   Institucion?      @relation(fields: [institucionId], references: [id])
+  respuestas    Json // respuestas del formulario
+  estado        EstadoPostulacion @default(PENDIENTE)
+  revisorId     String?
+  revisor       Usuario?          @relation("PostulacionesRevisadas", fields: [revisorId], references: [id])
+  notas         String?
+  creadaEn      DateTime          @default(now())
+  revisadaEn    DateTime?
+
+  @@index([estado, tipo])
+  @@map("postulaciones")
+}
+
+// ───────────────────── AUDITORÍA ─────────────────────
+
+model Auditoria {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     Usuario? @relation(fields: [actorId], references: [id])
+  accion    String // ej: "multa.emitir", "cuenta.congelar"
+  entidad   String // ej: "Multa"
+  entidadId String?
+  detalle   Json?
+  creadaEn  DateTime @default(now())
+
+  @@index([entidad, entidadId])
+  @@index([actorId])
+  @@map("auditoria")
+}
