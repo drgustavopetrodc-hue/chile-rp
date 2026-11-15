@@ -14,8 +14,14 @@ export const config = {
     staff: req('ROL_STAFF_ID'),
     noVerificado: req('ROL_NO_VERIFICADO_ID'),
     ciudadano: req('ROL_CIUDADANO_ID'),
+    policia: process.env.ROL_POLICIA_ID,
+    segundoPersonaje: process.env.ROL_SEGUNDO_PERSONAJE_ID,
+    soporte: process.env.ROL_SOPORTE_ID,
+    moderador: process.env.ROL_MODERADOR_ID,
+    admin: process.env.ROL_ADMIN_ID,
   },
   canales: {
     revision: req('CANAL_REVISION_ID'),
+    categoriaTickets: process.env.CATEGORIA_TICKETS_ID,
   },
 }

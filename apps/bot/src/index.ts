@@ -3,16 +3,26 @@ import { config } from './config'
 import { comandos } from './commands'
 import { manejarBoton, manejarModal } from './handlers/verificacion'
 import { asegurarUsuario } from './utils/usuarios'
+import { enviarBienvenida } from './commands/bienvenida'
+import { manejarBotonTicket, manejarModalTicket } from './commands/comunidad'
+import { cargarConfiguracionServidor, configuracion, usuarioPuedeUsarComando } from './commands/configuracion'
+import { cargarAutoReaccion, manejarAutoReaccion } from './commands/owner'
 
 const client = new Client({
   // GuildMembers es un intent privilegiado: actívalo en el Developer Portal > Bot.
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages],
 })
 
 const mapaComandos = new Map(comandos.map((c) => [c.data.name, c]))
 
-client.once(Events.ClientReady, (c) => {
+client.once(Events.ClientReady, async (c) => {
+  await cargarConfiguracionServidor().catch((err) => console.error('No se pudo cargar la configuración del servidor:', err))
+  await cargarAutoReaccion().catch((err) => console.error('No se pudo cargar la auto-reacción:', err))
   console.log(`Bot conectado como ${c.user.tag}`)
+})
+
+client.on(Events.MessageCreate, (mensaje) => {
+  void manejarAutoReaccion(mensaje)
 })
 
 // Al entrar al servidor: se registra el usuario y se le da el rol "No verificado".
@@ -21,6 +31,7 @@ client.on(Events.GuildMemberAdd, async (miembro) => {
   try {
     await asegurarUsuario(miembro.user)
     await miembro.roles.add(config.roles.noVerificado)
+    await enviarBienvenida(miembro)
   } catch (err) {
     console.error('Error al recibir a un nuevo miembro:', err)
   }
@@ -29,7 +40,15 @@ client.on(Events.GuildMemberAdd, async (miembro) => {
 client.on(Events.InteractionCreate, async (i) => {
   try {
     if (i.isChatInputCommand()) {
+      if (!await usuarioPuedeUsarComando(i.commandName, i.user.id)) {
+        await i.reply({ content: 'Debes completar la verificación antes de usar este comando.', flags: MessageFlags.Ephemeral })
+        return
+      }
       await mapaComandos.get(i.commandName)?.execute(i)
+    } else if (i.isButton() && i.customId.startsWith('ticketpanel:')) {
+      await manejarBotonTicket(i)
+    } else if (i.isModalSubmit() && i.customId.startsWith('ticketpanel:')) {
+      await manejarModalTicket(i)
     } else if (i.isButton() && i.customId.startsWith('verif:')) {
       await manejarBoton(i)
     } else if (i.isModalSubmit() && i.customId.startsWith('verif:')) {

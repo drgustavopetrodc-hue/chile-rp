@@ -135,18 +135,18 @@ enum EstadoPostulacion {
 // ───────────────── USUARIOS Y VERIFICACIÓN ─────────────────
 
 model Usuario {
-  id             String             @id @default(cuid())
-  discordId      String             @unique
-  username       String
-  avatar         String?
-  rol            RolPlataforma      @default(JUGADOR)
-  verificacion   EstadoVerificacion @default(PENDIENTE)
-  verificadoEn   DateTime?
+  id              String             @id @default(cuid())
+  discordId       String             @unique
+  username        String
+  avatar          String?
+  rol             RolPlataforma      @default(JUGADOR)
+  verificacion    EstadoVerificacion @default(PENDIENTE)
+  verificadoEn    DateTime?
   verificadoPorId String?
-  verificadoPor  Usuario?           @relation("Verificaciones", fields: [verificadoPorId], references: [id])
-  verificados    Usuario[]          @relation("Verificaciones")
-  creadoEn       DateTime           @default(now())
-  actualizadoEn  DateTime           @updatedAt
+  verificadoPor   Usuario?           @relation("Verificaciones", fields: [verificadoPorId], references: [id])
+  verificados     Usuario[]          @relation("Verificaciones")
+  creadoEn        DateTime           @default(now())
+  actualizadoEn   DateTime           @updatedAt
 
   personajes             Personaje[]
   ticketsCreados         Ticket[]      @relation("TicketsCreados")
@@ -162,29 +162,90 @@ model Usuario {
 // ───────────────────── PERSONAJES Y DOCUMENTOS ─────────────────────
 
 model Personaje {
-  id              String   @id @default(cuid())
-  usuarioId       String
-  usuario         Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-  nombres         String
-  apellidos       String
-  rut             String   @unique // RUT ficticio del RP, ej: 21.345.678-9
-  fechaNacimiento DateTime
-  nacionalidad    String   @default("Chilena")
-  activo          Boolean  @default(true)
-  creadoEn        DateTime @default(now())
-  actualizadoEn   DateTime @updatedAt
+  id                  String    @id @default(cuid())
+  usuarioId           String
+  usuario             Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  nombres             String
+  apellidos           String
+  rut                 String    @unique // RUT ficticio del RP, ej: 21.345.678-9
+  fechaNacimiento     DateTime
+  nacionalidad        String    @default("Chilena")
+  activo              Boolean   @default(true)
+  dinero              BigInt    @default(0)
+  dineroSucio         BigInt    @default(0)
+  diarioDisponibleEn  DateTime?
+  trabajoDisponibleEn DateTime?
+  crimenDisponibleEn  DateTime?
+  lavadoDisponibleEn  DateTime?
+  creadoEn            DateTime  @default(now())
+  actualizadoEn       DateTime  @updatedAt
 
   cedula          Cedula?
   documentos      Documento[]
   cuentas         CuentaBancaria[]
   cargos          Funcionario[]
   participaciones CasoParticipante[]
-  multasRecibidas Multa[]            @relation("MultasRecibidas")
-  multasEmitidas  Multa[]            @relation("MultasEmitidas")
+  multasRecibidas Multa[]              @relation("MultasRecibidas")
+  multasEmitidas  Multa[]              @relation("MultasEmitidas")
   antecedentes    Antecedente[]
+  inventario      InventarioItem[]
+  vehiculos       Vehiculo[]
+  movimientos     MovimientoEconomia[]
 
   @@index([usuarioId])
   @@map("personajes")
+}
+
+model Item {
+  id          String   @id @default(cuid())
+  nombre      String   @unique
+  descripcion String?
+  precio      BigInt   @default(0)
+  activa      Boolean  @default(true)
+  creadoEn    DateTime @default(now())
+
+  inventarios InventarioItem[]
+
+  @@map("items")
+}
+
+model InventarioItem {
+  id          String    @id @default(cuid())
+  personajeId String
+  personaje   Personaje @relation(fields: [personajeId], references: [id], onDelete: Cascade)
+  itemId      String
+  item        Item      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  cantidad    Int       @default(0)
+
+  @@unique([personajeId, itemId])
+  @@map("inventario_items")
+}
+
+model Vehiculo {
+  id           String    @id @default(cuid())
+  patente      String    @unique
+  modelo       String
+  color        String?
+  personajeId  String
+  personaje    Personaje @relation(fields: [personajeId], references: [id], onDelete: Cascade)
+  activo       Boolean   @default(true)
+  registradoEn DateTime  @default(now())
+
+  @@index([personajeId, activo])
+  @@map("vehiculos")
+}
+
+model MovimientoEconomia {
+  id          String    @id @default(cuid())
+  personajeId String
+  personaje   Personaje @relation(fields: [personajeId], references: [id], onDelete: Cascade)
+  tipo        String
+  monto       BigInt
+  descripcion String?
+  creadoEn    DateTime  @default(now())
+
+  @@index([personajeId, creadoEn])
+  @@map("movimientos_economia")
 }
 
 model Cedula {
@@ -339,35 +400,35 @@ model CasoParticipante {
 }
 
 model Multa {
-  id               String       @id @default(cuid())
-  personajeId      String // quien recibe la multa
-  personaje        Personaje    @relation("MultasRecibidas", fields: [personajeId], references: [id])
-  emisorId         String // personaje funcionario que la cursa
-  emisor           Personaje    @relation("MultasEmitidas", fields: [emisorId], references: [id])
-  casoId           String?
-  caso             Caso?        @relation(fields: [casoId], references: [id])
-  motivo           String
-  monto            BigInt
-  estado           EstadoMulta  @default(PENDIENTE)
-  emitidaEn        DateTime     @default(now())
-  pagadaEn         DateTime?
-  transaccionPagoId String?     @unique
-  transaccionPago  Transaccion? @relation(fields: [transaccionPagoId], references: [id])
+  id                String       @id @default(cuid())
+  personajeId       String // quien recibe la multa
+  personaje         Personaje    @relation("MultasRecibidas", fields: [personajeId], references: [id])
+  emisorId          String // personaje funcionario que la cursa
+  emisor            Personaje    @relation("MultasEmitidas", fields: [emisorId], references: [id])
+  casoId            String?
+  caso              Caso?        @relation(fields: [casoId], references: [id])
+  motivo            String
+  monto             BigInt
+  estado            EstadoMulta  @default(PENDIENTE)
+  emitidaEn         DateTime     @default(now())
+  pagadaEn          DateTime?
+  transaccionPagoId String?      @unique
+  transaccionPago   Transaccion? @relation(fields: [transaccionPagoId], references: [id])
 
   @@index([personajeId, estado])
   @@map("multas")
 }
 
 model Antecedente {
-  id          String    @id @default(cuid())
-  personajeId String
-  personaje   Personaje @relation(fields: [personajeId], references: [id], onDelete: Cascade)
-  casoId      String?
-  caso        Caso?     @relation(fields: [casoId], references: [id])
-  descripcion String
-  vigente     Boolean   @default(true)
-  registradoEn DateTime @default(now())
-  expiraEn    DateTime?
+  id           String    @id @default(cuid())
+  personajeId  String
+  personaje    Personaje @relation(fields: [personajeId], references: [id], onDelete: Cascade)
+  casoId       String?
+  caso         Caso?     @relation(fields: [casoId], references: [id])
+  descripcion  String
+  vigente      Boolean   @default(true)
+  registradoEn DateTime  @default(now())
+  expiraEn     DateTime?
 
   @@index([personajeId, vigente])
   @@map("antecedentes")
@@ -428,4 +489,13 @@ model Auditoria {
   @@index([entidad, entidadId])
   @@index([actorId])
   @@map("auditoria")
+}
+
+model ConfiguracionServidor {
+  id            String   @id @default(cuid())
+  clave         String   @unique
+  valor         Json
+  actualizadoEn DateTime @updatedAt
+
+  @@map("configuracion_servidor")
 }
