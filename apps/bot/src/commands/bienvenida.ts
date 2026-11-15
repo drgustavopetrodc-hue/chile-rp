@@ -1,12 +1,14 @@
 import {
   ChannelType,
   ChatInputCommandInteraction,
+  GuildMember,
   InteractionContextType,
   MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
 } from 'discord.js'
 import { db } from '@rp-chile/db'
+import { enviarComponentsV2 } from '../utils/components-v2'
 
 const efimero = MessageFlags.Ephemeral
 const clave = 'bienvenida.config'
@@ -50,18 +52,30 @@ async function ejecutarBienvenida(i: ChatInputCommandInteraction) {
   const canal = await i.guild?.channels.fetch(config.canalId)
   if (!canal?.isTextBased() || !('send' in canal)) return i.reply({ content: 'El canal configurado ya no está disponible.', flags: efimero })
   const plantilla = await obtenerMensaje()
-  await canal.send({ content: renderizar(plantilla, i.user.id, i.guild!.name), allowedMentions: { users: [i.user.id], parse: [] } })
+  await enviarComponentsV2(canal, { content: renderizar(plantilla, i.user.id, i.guild!.name), allowedMentions: { users: [i.user.id], parse: [] } })
   return i.reply({ content: 'Mensaje de prueba publicado.', flags: efimero })
 }
 
-export async function enviarBienvenida(miembro: { id: string; guild: { name: string; channels: { fetch: (id: string) => Promise<unknown> } } }) {
+export async function enviarBienvenida(miembro: GuildMember) {
   const fila = await db.configuracionServidor.findUnique({ where: { clave } })
   const config = fila?.valor as { habilitado?: boolean; canalId?: string } | undefined
   if (!config?.habilitado || !config.canalId) return
-  const canal = await miembro.guild.channels.fetch(config.canalId) as { isTextBased?: () => boolean; send?: (message: unknown) => Promise<unknown> } | null
-  if (!canal?.isTextBased?.() || !canal.send) return
+  if (!miembro.joinedTimestamp) return
+  const canal = await miembro.guild.channels.fetch(config.canalId)
+  if (!canal?.isTextBased() || !('send' in canal)) return
   const plantilla = await obtenerMensaje()
-  await canal.send({ content: renderizar(plantilla, miembro.id, miembro.guild.name), allowedMentions: { users: [miembro.id], parse: [] } })
+  const usuario = await db.usuario.findUnique({ where: { discordId: miembro.id }, select: { id: true } })
+  if (!usuario) return
+  const eventoKey = `${miembro.guild.id}:${miembro.id}:${miembro.joinedTimestamp}`
+  const reclamo = await db.usuario.updateMany({
+    where: {
+      id: usuario.id,
+      OR: [{ bienvenidaEventoKey: null }, { bienvenidaEventoKey: { not: eventoKey } }],
+    },
+    data: { bienvenidaEventoKey: eventoKey },
+  })
+  if (!reclamo.count) return
+  await enviarComponentsV2(canal, { content: renderizar(plantilla, miembro.id, miembro.guild.name), allowedMentions: { users: [miembro.id], parse: [] } })
 }
 
 async function obtenerMensaje() {

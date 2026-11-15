@@ -11,6 +11,7 @@ import {
 } from 'discord.js'
 import { db } from '@rp-chile/db'
 import { crearEmbed, coloresEmbed } from '../utils/embeds'
+import { editarComponentsV2, enviarComponentsV2 } from '../utils/components-v2'
 
 const efimero = MessageFlags.Ephemeral
 const reglasPorDefecto = 'Respeta las reglas del servidor, mantén el rol y trata a los demás con respeto.'
@@ -80,7 +81,7 @@ async function ejecutarApertura(i: ChatInputCommandInteraction) {
     const contra = votos.size - favor
     const abierto = motivo === 'meta' && favor >= meta
     if (abierto) await guardarEstado(true, 'Votación aprobada')
-    await mensaje.edit({
+    await editarComponentsV2(mensaje, {
       embeds: [crearEmbed(abierto ? 'Meta alcanzada · servidor abierto' : 'Plazo finalizado · servidor cerrado',
         `Votos favorables: **${favor}/${meta}** · En contra: **${contra}**.${abierto ? '' : '\nNo se alcanzó la meta dentro de los 30 minutos.'}`,
         abierto ? coloresEmbed.exito : coloresEmbed.neutro)],
@@ -108,7 +109,7 @@ async function ejecutarCierre(i: ChatInputCommandInteraction) {
 async function ejecutarEntorno(i: ChatInputCommandInteraction) {
   if (!esStaff(i)) return denegado(i)
   if (!i.channel?.isSendable()) return i.reply({ content: 'No puedo escribir en este canal.', flags: efimero })
-  await i.channel.send({ content: `**ENTORNO**\n${i.options.getString('mensaje', true)}`, allowedMentions: { parse: [] } })
+  await enviarComponentsV2(i.channel, { content: `**ENTORNO**\n${i.options.getString('mensaje', true)}`, allowedMentions: { parse: [] } })
   return i.reply({ content: 'Mensaje de entorno publicado.', flags: efimero })
 }
 
@@ -117,7 +118,7 @@ async function ejecutarAlerta(i: ChatInputCommandInteraction) {
   const canalId = i.options.getChannel('canal')?.id ?? i.channelId
   const canal = await i.guild?.channels.fetch(canalId)
   if (!canal?.isTextBased() || !('send' in canal)) return i.reply({ content: 'El canal elegido no permite mensajes.', flags: efimero })
-  await canal.send({ content: `**ALERTA**\n${i.options.getString('mensaje', true)}`, allowedMentions: { parse: [] } })
+  await enviarComponentsV2(canal, { content: `**ALERTA**\n${i.options.getString('mensaje', true)}`, allowedMentions: { parse: [] } })
   return i.reply({ content: `Alerta publicada en ${canal}.`, flags: efimero })
 }
 

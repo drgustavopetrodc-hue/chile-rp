@@ -20,6 +20,7 @@ import { CategoriaTicket, db } from '@rp-chile/db'
 import { config } from '../config'
 import { asegurarUsuario } from '../utils/usuarios'
 import { crearEmbed } from '../utils/embeds'
+import { enviarComponentsV2 } from '../utils/components-v2'
 
 const efimero = MessageFlags.Ephemeral
 
@@ -88,7 +89,7 @@ async function ejecutarTicketPanel(i: ChatInputCommandInteraction) {
   if (!esAdmin(i)) return i.reply({ content: 'Solo administradores pueden publicar el panel de tickets.', flags: efimero })
   if (!i.channel?.isSendable()) return i.reply({ content: 'No puedo escribir en este canal.', flags: efimero })
   const boton = new ButtonBuilder().setCustomId('ticketpanel:abrir').setLabel('Abrir ticket').setStyle(ButtonStyle.Primary)
-  await i.channel.send({
+  await enviarComponentsV2(i.channel, {
     embeds: [crearEmbed('Centro de soporte', 'Describe tu solicitud y el equipo te responderá en un canal privado.')],
     components: [new ActionRowBuilder<ButtonBuilder>().addComponents(boton)],
   })
@@ -133,7 +134,7 @@ async function crearTicket(guild: Guild, usuarioDiscord: User, asunto: string, c
   })
   try {
     const ticket = await db.ticket.create({ data: { usuarioId: usuario.id, asunto, categoria, canalDiscordId: canal.id } })
-    await canal.send({ content: `<@&${config.roles.soporte}> · <@${usuarioDiscord.id}>` })
+    await enviarComponentsV2(canal, { content: `<@&${config.roles.soporte}> · <@${usuarioDiscord.id}>` })
     return { canal, ticket }
   } catch (error) {
     await canal.delete('No se pudo registrar el ticket en la base de datos').catch(() => {})

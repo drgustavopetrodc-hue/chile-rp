@@ -135,18 +135,19 @@ enum EstadoPostulacion {
 // ───────────────── USUARIOS Y VERIFICACIÓN ─────────────────
 
 model Usuario {
-  id              String             @id @default(cuid())
-  discordId       String             @unique
-  username        String
-  avatar          String?
-  rol             RolPlataforma      @default(JUGADOR)
-  verificacion    EstadoVerificacion @default(PENDIENTE)
-  verificadoEn    DateTime?
-  verificadoPorId String?
-  verificadoPor   Usuario?           @relation("Verificaciones", fields: [verificadoPorId], references: [id])
-  verificados     Usuario[]          @relation("Verificaciones")
-  creadoEn        DateTime           @default(now())
-  actualizadoEn   DateTime           @updatedAt
+  id                  String             @id @default(cuid())
+  discordId           String             @unique
+  username            String
+  avatar              String?
+  rol                 RolPlataforma      @default(JUGADOR)
+  verificacion        EstadoVerificacion @default(PENDIENTE)
+  verificadoEn        DateTime?
+  verificadoPorId     String?
+  verificadoPor       Usuario?           @relation("Verificaciones", fields: [verificadoPorId], references: [id])
+  verificados         Usuario[]          @relation("Verificaciones")
+  bienvenidaEventoKey String?
+  creadoEn            DateTime           @default(now())
+  actualizadoEn       DateTime           @updatedAt
 
   personajes             Personaje[]
   ticketsCreados         Ticket[]      @relation("TicketsCreados")

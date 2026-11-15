@@ -7,6 +7,7 @@ import {
   SlashCommandBuilder,
 } from 'discord.js'
 import { crearEmbed, coloresEmbed } from '../utils/embeds'
+import { enviarComponentsV2 } from '../utils/components-v2'
 
 const efimero = MessageFlags.Ephemeral
 
@@ -38,7 +39,7 @@ async function ejecutarEmbed(i: ChatInputCommandInteraction) {
     anuncio ? coloresEmbed.principal : coloresEmbed.neutro,
   )
     .setFooter({ text: anuncio ? `Anuncio oficial · ${i.guild!.name}` : `Confesión revisada · ${i.guild!.name}` })
-  await canal.send({ embeds: [embed], allowedMentions: { parse: [] } })
+  await enviarComponentsV2(canal, { embeds: [embed], allowedMentions: { parse: [] } })
   return i.reply({ content: `${anuncio ? 'Anuncio' : 'Confesión'} publicada en ${canal}.`, flags: efimero })
 }
 

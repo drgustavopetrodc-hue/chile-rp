@@ -19,6 +19,7 @@ import { asegurarUsuario } from '../utils/usuarios'
 import { crearEmbed, coloresEmbed } from '../utils/embeds'
 import { obtenerAvatarRoblox } from '../utils/roblox'
 import { generarImagenCedula } from '../utils/cedula-imagen'
+import { editarComponentsV2, enviarComponentsV2 } from '../utils/components-v2'
 
 const EFIMERO = MessageFlags.Ephemeral
 const AMARILLO = coloresEmbed.aviso
@@ -179,7 +180,7 @@ async function recibirPostulacion(i: ModalSubmitInteraction) {
   try {
     const canal = await i.client.channels.fetch(config.canales.revision)
     if (!canal || !canal.isSendable()) throw new Error('El canal de revisión no es válido')
-    await canal.send({ embeds: [embed], components: [fila] })
+    await enviarComponentsV2(canal, { embeds: [embed], components: [fila] })
   } catch (err) {
     console.error(err)
     await db.postulacion.delete({ where: { id: postulacion.id } })
@@ -267,16 +268,16 @@ async function aprobar(i: ButtonInteraction, id: string) {
           venceEn: personaje.cedula.venceEn,
           avatar: roblox.avatar,
         })
-        await miembro.send({
+        await enviarComponentsV2(miembro, {
           content: `✅ Tu postulación fue **aprobada**. Ya eres ciudadano. RUT: **${rut}**.`,
           files: [new AttachmentBuilder(png, { name: `cedula-${rut.replace(/[^a-zA-Z0-9]/g, '')}.png` })],
         })
       } catch (error) {
         console.error('No se pudo enviar la cédula gráfica:', error)
-        await miembro.send(`✅ Tu postulación fue **aprobada**. RUT: **${rut}**. Usa \`/cedula mostrar\` para recuperar tu cédula gráfica.`).catch(() => {})
+        await enviarComponentsV2(miembro, `✅ Tu postulación fue **aprobada**. RUT: **${rut}**. Usa \`/cedula mostrar\` para recuperar tu cédula gráfica.`).catch(() => {})
       }
     } else {
-      await miembro.send(`✅ Tu postulación fue **aprobada**. RUT: **${rut}**. Usa \`/cedula vincular\` para completar tu cédula con Roblox.`).catch(() => {})
+      await enviarComponentsV2(miembro, `✅ Tu postulación fue **aprobada**. RUT: **${rut}**. Usa \`/cedula vincular\` para completar tu cédula con Roblox.`).catch(() => {})
     }
   }
 
@@ -330,9 +331,9 @@ async function rechazar(i: ModalSubmitInteraction, id: string) {
   })
 
   const miembro = await i.guild.members.fetch(post.usuario.discordId).catch(() => null)
-  await miembro
-    ?.send(`❌ Tu postulación fue **rechazada**.\n**Motivo:** ${motivo}\nPuedes volver a postular cuando quieras.`)
-    .catch(() => {})
+  if (miembro) {
+    await enviarComponentsV2(miembro, `❌ Tu postulación fue **rechazada**.\n**Motivo:** ${motivo}\nPuedes volver a postular cuando quieras.`).catch(() => {})
+  }
 
   await actualizarMensaje(i, ROJO, `❌ Rechazada por ${i.user}\n**Motivo:** ${motivo}`)
   return i.editReply('Postulación rechazada.')
@@ -344,5 +345,5 @@ async function actualizarMensaje(i: ButtonInteraction | ModalSubmitInteraction, 
   const original = i.message?.embeds[0]
   if (!original) return
   const embed = EmbedBuilder.from(original).setColor(color).addFields({ name: 'Resultado', value: resultado })
-  await i.message?.edit({ embeds: [embed], components: [] }).catch(console.error)
+  if (i.message) await editarComponentsV2(i.message, { embeds: [embed], components: [] }).catch(console.error)
 }

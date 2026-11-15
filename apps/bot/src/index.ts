@@ -7,6 +7,7 @@ import { enviarBienvenida } from './commands/bienvenida'
 import { manejarBotonTicket, manejarModalTicket } from './commands/comunidad'
 import { cargarConfiguracionServidor, configuracion, usuarioPuedeUsarComando } from './commands/configuracion'
 import { cargarAutoReaccion, manejarAutoReaccion } from './commands/owner'
+import { adaptarInteraccionAComponentsV2 } from './utils/components-v2'
 
 const client = new Client({
   // GuildMembers es un intent privilegiado: actívalo en el Developer Portal > Bot.
@@ -38,6 +39,7 @@ client.on(Events.GuildMemberAdd, async (miembro) => {
 })
 
 client.on(Events.InteractionCreate, async (i) => {
+  adaptarInteraccionAComponentsV2(i)
   try {
     if (i.isChatInputCommand()) {
       if (!await usuarioPuedeUsarComando(i.commandName, i.user.id)) {
