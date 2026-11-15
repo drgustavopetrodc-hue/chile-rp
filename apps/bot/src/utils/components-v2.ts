@@ -80,20 +80,26 @@ export function comoComponentsV2(payload: string | Payload, incluirFlags = true)
 
 export function adaptarInteraccionAComponentsV2(interaccion: object) {
   const destino = interaccion as Record<string, (...args: any[]) => any>
+  let flagsRespuesta = 0
   for (const nombre of ['reply', 'editReply', 'followUp', 'update']) {
     const metodo = destino[nombre]
     if (typeof metodo !== 'function') continue
-    destino[nombre] = (payload: string | Payload, ...resto: any[]) =>
-      metodo.call(interaccion, comoComponentsV2(payload, nombre !== 'editReply'), ...resto)
+    destino[nombre] = (payload: string | Payload, ...resto: any[]) => {
+      const convertido = comoComponentsV2(payload)
+      if (nombre === 'editReply') convertido.flags = numeroFlags(convertido.flags) | flagsRespuesta | MessageFlags.IsComponentsV2
+      else if (nombre === 'reply') flagsRespuesta = numeroFlags(convertido.flags)
+      return metodo.call(interaccion, convertido, ...resto)
+    }
   }
 
   const deferReply = destino.deferReply
   if (typeof deferReply === 'function') {
     destino.deferReply = (opciones: Payload = {}, ...resto: any[]) => {
       const flags = numeroFlags(opciones.flags)
+      flagsRespuesta = flags | MessageFlags.IsComponentsV2
       return deferReply.call(interaccion, {
         ...opciones,
-        flags: flags | MessageFlags.IsComponentsV2,
+        flags: flagsRespuesta,
       }, ...resto)
     }
   }
