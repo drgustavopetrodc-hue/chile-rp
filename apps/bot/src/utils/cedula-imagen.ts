@@ -1,4 +1,8 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas'
+import { registerFont } from '@napi-rs/canvas/node-canvas'
+import { fileURLToPath } from 'node:url'
+
+registerFont(fileURLToPath(new URL('../../assets/fonts/NotoSans-Regular.ttf', import.meta.url)), { family: 'NotoSans' })
 
 export interface DatosCedulaImagen {
   nombres: string
@@ -49,13 +53,13 @@ export async function generarImagenCedula(datos: DatosCedulaImagen) {
   ctx.strokeRect(10, 10, ancho - 20, alto - 20)
   dibujarBandera(ctx, 48, 42, 84, 54)
   ctx.fillStyle = azulOscuro
-  ctx.font = '800 43px Arial'
+  ctx.font = '800 43px NotoSans'
   ctx.fillText('REPÚBLICA DE CHILE', 155, 79, 690)
   ctx.fillStyle = '#486579'
-  ctx.font = '700 19px Arial'
+  ctx.font = '700 19px NotoSans'
   ctx.fillText('SERVICIO DE REGISTRO CIVIL E IDENTIFICACIÓN', 158, 111, 760)
   ctx.fillStyle = azul
-  ctx.font = '800 22px Arial'
+  ctx.font = '800 22px NotoSans'
   ctx.fillText('CÉDULA DE IDENTIDAD', 48, 155)
   ctx.fillStyle = '#ba7657'
   ctx.fillRect(48, 171, ancho - 96, 3)
@@ -97,7 +101,7 @@ export async function generarImagenCedula(datos: DatosCedulaImagen) {
   ctx.font = '700 14px Arial'
   ctx.fillText('FIRMA DEL TITULAR', 805, 713)
   ctx.fillStyle = '#536775'
-  ctx.font = '600 13px Arial'
+  ctx.font = '600 13px NotoSans'
   ctx.textAlign = 'right'
   ctx.fillText('DOCUMENTO DE ROLEPLAY · NO OFICIAL', ancho - 48, alto - 28)
   ctx.textAlign = 'left'
@@ -107,10 +111,10 @@ export async function generarImagenCedula(datos: DatosCedulaImagen) {
 
 function campo(ctx: ReturnType<ReturnType<typeof createCanvas>['getContext']>, titulo: string, valor: string, x: number, y: number, maxWidth: number) {
   ctx.fillStyle = etiqueta
-  ctx.font = '800 18px Arial'
+  ctx.font = '800 18px NotoSans'
   ctx.fillText(titulo, x, y, maxWidth)
   ctx.fillStyle = tinta
-  ctx.font = '700 24px Arial'
+  ctx.font = '700 24px NotoSans'
   ctx.fillText(valor, x, y + 34, maxWidth)
 }
 
@@ -122,7 +126,7 @@ function dibujarBandera(ctx: ReturnType<ReturnType<typeof createCanvas>['getCont
   ctx.fillStyle = '#0039a6'
   ctx.fillRect(x, y, h / 2, h / 2)
   ctx.fillStyle = '#ffffff'
-  ctx.font = 'bold 23px Arial'
+  ctx.font = 'bold 23px NotoSans'
   ctx.textAlign = 'center'
   ctx.fillText('★', x + h / 4, y + h / 2 - 7)
   ctx.textAlign = 'left'

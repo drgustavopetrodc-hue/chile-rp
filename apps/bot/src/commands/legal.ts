@@ -404,12 +404,32 @@ function crearFichaLegal({
     timeStyle: 'short',
     timeZone: 'America/Santiago',
   }).format(fecha)
-  return crearEmbed(titulo, 'La entidad responsable registró el procedimiento. La evidencia gráfica se adjunta al documento.', coloresEmbed.aviso)
-    .addFields(
-      { name: 'Información Ciudadano', value: `• **Nombre:** ${objetivo.nombres} ${objetivo.apellidos}\n• **RUT:** ${objetivo.rut}` },
-      { name: 'Información Agente', value: `• **Nombre:** ${agente.nombres} ${agente.apellidos}` },
-      { name: 'Delito Imputado', value: `• **Artículo ${articulo.numero}:** ${articulo.delito}\n• **Título:** ${articulo.titulo}\n• **Pena legal:** ${articulo.pena}` },
-      { name: 'Información Registro', value: `• **Código Documento:** ${codigo}\n• **Fecha:** ${fechaLocal}\n• **Condena RP:** ${condena}\n• **Motivo:** ${motivo}` },
-    )
-    .setImage(`attachment://${foto}`)
+
+  const descripcion =
+    'Se ha registrado un procedimiento policial en el sistema.\n\n' +
+
+    '**Información Ciudadano**\n' +
+    `• **Nombre:** ${objetivo.nombres} ${objetivo.apellidos}\n` +
+    `• **RUT:** ${objetivo.rut}\n\n` +
+
+    '**Información Funcionario**\n' +
+    `• **Nombre:** ${agente.nombres} ${agente.apellidos}\n\n` +
+
+    '**Información Delito**\n' +
+    `• **Artículo:** ${articulo.numero}\n` +
+    `• **Delito:** ${articulo.delito}\n` +
+    `• **Título:** ${articulo.titulo}\n` +
+    `• **Pena legal:** ${articulo.pena}\n\n` +
+
+    '**Información Registro**\n' +
+    `• **Código Documento:** ${codigo}\n` +
+    `• **Fecha:** ${fechaLocal}\n` +
+    `• **Condena RP:** ${condena}\n` +
+    `• **Motivo:** ${motivo}`
+
+  return crearEmbed(
+    titulo,
+    descripcion,
+    coloresEmbed.aviso
+  )
 }
