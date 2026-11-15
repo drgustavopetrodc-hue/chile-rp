@@ -1,0 +1,84 @@
+# RP Chile
+
+Plataforma del servidor de roleplay de Chile: bot de Discord + base de datos compartida (y, próximamente, la página web).
+
+## Estructura
+
+```
+rp-chile/
+├── apps/
+│   └── bot/            Bot de Discord (discord.js)
+├── packages/
+│   └── db/             Esquema de Prisma + cliente compartido (Neon/PostgreSQL)
+├── package.json        Workspaces de npm
+└── README.md
+```
+
+La web (Next.js) irá en `apps/web` y usará el mismo paquete `@rp-chile/db`.
+
+## Requisitos
+
+- Node.js 20.19 o superior
+- Una base de datos en [Neon](https://neon.tech) (necesitas la cadena *pooled* y la *direct*)
+- Una aplicación de bot creada en el Discord Developer Portal
+
+## Puesta en marcha
+
+1. Instalar dependencias (desde la raíz):
+   ```bash
+   npm install
+   ```
+2. Variables de entorno. Copia los dos `.env.example` a `.env` y complétalos:
+   - `packages/db/.env`: `DATABASE_URL` (pooled) y `DATABASE_URL_UNPOOLED` (direct).
+   - `apps/bot/.env`: token del bot, IDs del servidor, roles y canal de revisión, más las mismas dos cadenas de la base de datos.
+3. Crear las tablas en Neon y generar el cliente de Prisma:
+   ```bash
+   npm run migrate -w @rp-chile/db -- --name init
+   npm run db:generate
+   ```
+4. Registrar los comandos del bot (una vez, y cada vez que los cambies):
+   ```bash
+   npm run bot:deploy-commands
+   ```
+5. Arrancar el bot en desarrollo:
+   ```bash
+   npm run bot:dev
+   ```
+6. En Discord, usa `/panel-verificacion` en tu canal de verificación.
+
+## Configuración en Discord
+
+- En el Developer Portal, sección **Bot**, activa el intent **Server Members**.
+- Invita el bot con los scopes `bot` y `applications.commands`, y con permisos para gestionar roles y apodos.
+- El rol del bot debe estar **por encima** de los roles *Ciudadano* y *No verificado*.
+
+## Estado
+
+- [x] Esquema de base de datos
+- [x] Verificación y whitelist de nuevos miembros
+- [x] `/cedula`
+- [ ] Tickets de soporte y postulaciones a instituciones
+- [ ] Registro de casos, multas y antecedentes
+- [ ] Banco
+- [ ] Página web (login con Discord, portal ciudadano, portales institucionales)
+
+## Seguridad
+
+Nunca subas archivos `.env` ni el token del bot a GitHub. El `.gitignore` ya los excluye. Si el token se filtra, regéneralo en el Developer Portal.
+
+## Despliegue del bot en Railway
+
+El bot necesita un proceso siempre encendido (no sirve Vercel). Railway lo despliega desde GitHub.
+
+1. Sube el repositorio a GitHub.
+2. En Railway: **New Project → Deploy from GitHub repo** y elige el repositorio.
+3. En los ajustes del servicio:
+   - **Root Directory:** déjalo en la raíz del repositorio (así funcionan los workspaces de npm).
+   - **Build Command:** `npm run db:generate`
+   - **Start Command:** `npm run bot:start`
+4. En **Variables** agrega las mismas del `.env` del bot: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_GUILD_ID`, `ROL_STAFF_ID`, `ROL_NO_VERIFICADO_ID`, `ROL_CIUDADANO_ID`, `CANAL_REVISION_ID`, `DATABASE_URL` y `DATABASE_URL_UNPOOLED`.
+5. Las migraciones de la base de datos se ejecutan desde tu computador (`npm run migrate -w @rp-chile/db -- --name <nombre>`), no desde Railway.
+6. Cada `git push` a la rama principal vuelve a desplegar el bot automáticamente.
+
+Railway cobra por uso (CPU y memoria por segundo). Revisa el consumo en el panel y configura un límite de gasto.
+"# chile-rp" 
