@@ -15,12 +15,12 @@ import { config } from '../config'
 import { edadEn, formatearFecha, parsearFecha } from '../utils/fechas'
 import { generarNumeroSerie, generarRut } from '../utils/rut'
 import { asegurarUsuario } from '../utils/usuarios'
+import { crearEmbed, coloresEmbed } from '../utils/embeds'
 
 const EFIMERO = MessageFlags.Ephemeral
-const AZUL = 0x0039a6
-const AMARILLO = 0xf1c40f
-const VERDE = 0x2ecc71
-const ROJO = 0xe74c3c
+const AMARILLO = coloresEmbed.aviso
+const VERDE = coloresEmbed.exito
+const ROJO = coloresEmbed.error
 
 interface Respuestas {
   nombres: string
@@ -35,14 +35,13 @@ class YaProcesada extends Error {}
 // ───────────── Panel que se publica en el canal de verificación ─────────────
 
 export function crearPanel() {
-  const embed = new EmbedBuilder()
-    .setColor(AZUL)
-    .setTitle('Verificación de ciudadanos')
-    .setDescription(
+  const embed = crearEmbed(
+    'Verificación de ciudadanos',
+    
       'Para entrar al servidor debes crear tu personaje y pasar la whitelist.\n\n' +
         'Pulsa el botón, completa el formulario y el staff revisará tu postulación. ' +
         'Si te aprueban, recibirás tu **cédula de identidad** y acceso al servidor.',
-    )
+  )
   const fila = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId('verif:iniciar').setLabel('Iniciar verificación').setStyle(ButtonStyle.Primary),
   )
@@ -148,9 +147,7 @@ async function recibirPostulacion(i: ModalSubmitInteraction) {
     data: { tipo: 'WHITELIST', usuarioId: usuario.id, respuestas: { ...respuestas } },
   })
 
-  const embed = new EmbedBuilder()
-    .setColor(AMARILLO)
-    .setTitle('Nueva postulación de whitelist')
+  const embed = crearEmbed('Nueva postulación de whitelist', 'Revisa los datos del personaje y evalúa su experiencia de rol.', AMARILLO)
     .setThumbnail(i.user.displayAvatarURL())
     .addFields(
       { name: 'Postulante', value: `${i.user} (${i.user.username})`, inline: true },
@@ -159,8 +156,7 @@ async function recibirPostulacion(i: ModalSubmitInteraction) {
       { name: 'Historia', value: historia },
       { name: 'Experiencia en RP', value: experiencia },
     )
-    .setFooter({ text: `ID: ${postulacion.id}` })
-    .setTimestamp()
+    .setFooter({ text: `Postulación ${postulacion.id} · RP Chile` })
 
   const fila = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`verif:aprobar:${postulacion.id}`).setLabel('Aprobar').setStyle(ButtonStyle.Success),

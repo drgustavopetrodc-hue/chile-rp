@@ -1,12 +1,12 @@
 import {
   ChannelType,
   ChatInputCommandInteraction,
-  EmbedBuilder,
   InteractionContextType,
   MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
 } from 'discord.js'
+import { crearEmbed, coloresEmbed } from '../utils/embeds'
 
 const efimero = MessageFlags.Ephemeral
 
@@ -32,12 +32,12 @@ async function ejecutarEmbed(i: ChatInputCommandInteraction) {
 
   const accion = i.options.getSubcommand()
   const anuncio = accion === 'anuncio'
-  const embed = new EmbedBuilder()
-    .setColor(anuncio ? 0x1e6f5c : 0x8c4a5e)
-    .setTitle(anuncio ? i.options.getString('titulo', true) : 'Confesión')
-    .setDescription(i.options.getString('mensaje', true))
+  const embed = crearEmbed(
+    anuncio ? i.options.getString('titulo', true) : 'Confesión',
+    i.options.getString('mensaje', true),
+    anuncio ? coloresEmbed.principal : coloresEmbed.neutro,
+  )
     .setFooter({ text: anuncio ? `Anuncio oficial · ${i.guild!.name}` : `Confesión revisada · ${i.guild!.name}` })
-    .setTimestamp()
   await canal.send({ embeds: [embed], allowedMentions: { parse: [] } })
   return i.reply({ content: `${anuncio ? 'Anuncio' : 'Confesión'} publicada en ${canal}.`, flags: efimero })
 }

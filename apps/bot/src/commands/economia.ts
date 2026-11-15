@@ -1,6 +1,5 @@
 import {
   ChatInputCommandInteraction,
-  EmbedBuilder,
   InteractionContextType,
   MessageFlags,
   PermissionFlagsBits,
@@ -8,6 +7,7 @@ import {
 } from 'discord.js'
 import { db } from '@rp-chile/db'
 import { formatearMoneda } from '../utils/moneda'
+import { crearEmbed } from '../utils/embeds'
 
 const efimero = MessageFlags.Ephemeral
 const plata = formatearMoneda
@@ -70,7 +70,7 @@ async function ejecutarEconomia(i: ChatInputCommandInteraction) {
   if (accion === 'balance') {
     const cuenta = await asegurarCuenta(personaje.id)
     return i.reply({
-      embeds: [new EmbedBuilder().setTitle(`Balance de ${personaje.nombres} ${personaje.apellidos}`).addFields(
+      embeds: [crearEmbed(`Balance · ${personaje.nombres} ${personaje.apellidos}`, 'Resumen de efectivo y fondos disponibles.').addFields(
         { name: 'Efectivo', value: plata(personaje.dinero), inline: true },
         { name: 'Banco', value: plata(cuenta.saldo), inline: true },
         { name: 'Dinero sucio', value: plata(personaje.dineroSucio), inline: true },
@@ -86,7 +86,7 @@ async function ejecutarEconomia(i: ChatInputCommandInteraction) {
   if (accion === 'top') {
     const top = await db.personaje.findMany({ where: { activo: true }, orderBy: { dinero: 'desc' }, take: 10 })
     return i.reply({
-      embeds: [new EmbedBuilder().setTitle('Personajes con más efectivo').setDescription(
+      embeds: [crearEmbed('Ranking de riqueza', 'Personajes con mayor efectivo disponible.').setDescription(
         top.length ? top.map((p, index) => `**${index + 1}.** ${p.nombres} ${p.apellidos} · ${plata(p.dinero)}`).join('\n') : 'Sin datos',
       )],
       flags: efimero,

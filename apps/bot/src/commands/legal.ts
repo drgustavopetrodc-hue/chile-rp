@@ -1,6 +1,5 @@
 import {
   ChatInputCommandInteraction,
-  EmbedBuilder,
   InteractionContextType,
   MessageFlags,
   PermissionFlagsBits,
@@ -9,6 +8,8 @@ import {
 import { db } from '@rp-chile/db'
 import { asegurarUsuario } from '../utils/usuarios'
 import { generarNumeroSerie } from '../utils/rut'
+import { crearEmbed, coloresEmbed } from '../utils/embeds'
+import { formatearMoneda } from '../utils/moneda'
 
 const efimero = MessageFlags.Ephemeral
 
@@ -112,9 +113,13 @@ async function ejecutarMultas(i: ChatInputCommandInteraction) {
   if (multas.length === 0) return i.reply({ content: 'No tienes multas registradas.', flags: efimero })
   return i.reply({
     embeds: [
-      new EmbedBuilder().setTitle(`Multas de ${personaje.nombres} ${personaje.apellidos}`).setDescription(
-        multas.map((m) => `**${m.id}** · $${m.monto.toLocaleString('es-CL')} · ${m.estado}\n${m.motivo}`).join('\n\n'),
-      ),
+      crearEmbed(`Multas · ${personaje.nombres} ${personaje.apellidos}`, 'Últimos registros asociados a tu personaje.')
+        .addFields(multas.map((m) => ({
+          name: `${m.estado === 'PENDIENTE' ? 'Pendiente' : m.estado === 'PAGADA' ? 'Pagada' : 'Anulada'} · ${formatearMoneda(m.monto)}`,
+          value: `${m.motivo}\nID: ${m.id}`,
+          inline: false,
+        })))
+        .setColor(multas.some((m) => m.estado === 'PENDIENTE') ? coloresEmbed.aviso : coloresEmbed.principal),
     ],
     flags: efimero,
   })

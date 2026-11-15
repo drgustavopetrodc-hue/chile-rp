@@ -1,6 +1,5 @@
 import {
   ChatInputCommandInteraction,
-  EmbedBuilder,
   InteractionContextType,
   MessageFlags,
   PermissionFlagsBits,
@@ -10,6 +9,7 @@ import { db } from '@rp-chile/db'
 import { config } from '../config'
 import { crearPersonaje } from '../utils/personajes'
 import { formatearFecha, parsearFecha } from '../utils/fechas'
+import { crearEmbed, coloresEmbed } from '../utils/embeds'
 
 export const data = new SlashCommandBuilder()
   .setName('cedula')
@@ -127,9 +127,7 @@ export async function execute(i: ChatInputCommandInteraction) {
   }
 
   const c = persona.cedula
-  const embed = new EmbedBuilder()
-    .setColor(0x0039a6)
-    .setTitle('República de Chile — Cédula de Identidad')
+  const embed = crearEmbed('Cédula de identidad', 'Documento oficial del personaje.', coloresEmbed.principal)
     .setThumbnail(i.client.users.cache.get(persona.usuario.discordId)?.displayAvatarURL() ?? null)
     .addFields(
       { name: 'Nombres', value: persona.nombres, inline: true },

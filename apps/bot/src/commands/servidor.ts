@@ -4,13 +4,13 @@ import {
   ButtonStyle,
   ChannelType,
   ChatInputCommandInteraction,
-  EmbedBuilder,
   InteractionContextType,
   MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
 } from 'discord.js'
 import { db } from '@rp-chile/db'
+import { crearEmbed, coloresEmbed } from '../utils/embeds'
 
 const efimero = MessageFlags.Ephemeral
 const reglasPorDefecto = 'Respeta las reglas del servidor, mantén el rol y trata a los demás con respeto.'
@@ -52,7 +52,7 @@ async function ejecutarApertura(i: ChatInputCommandInteraction) {
     new ButtonBuilder().setCustomId(noId).setLabel('Mantener cerrado').setStyle(ButtonStyle.Secondary),
   )
   const mensaje = await i.reply({
-    embeds: [new EmbedBuilder().setTitle('Votación de apertura').setDescription('La comunidad tiene 60 segundos para votar.')],
+    embeds: [crearEmbed('Votación de apertura', 'La comunidad tiene 60 segundos para votar.', coloresEmbed.aviso)],
     components: [botones()],
     fetchReply: true,
   })
@@ -64,7 +64,7 @@ async function ejecutarApertura(i: ChatInputCommandInteraction) {
     const favor = [...votos.values()].filter(Boolean).length
     const contra = votos.size - favor
     await boton.update({
-      embeds: [new EmbedBuilder().setTitle('Votación de apertura').setDescription(`A favor: **${favor}** · En contra: **${contra}**\nCierra en 60 segundos.`)],
+      embeds: [crearEmbed('Votación de apertura', `A favor: **${favor}** · En contra: **${contra}**\nCierra en 60 segundos.`, coloresEmbed.aviso)],
       components: [botones()],
     })
   })
@@ -74,8 +74,8 @@ async function ejecutarApertura(i: ChatInputCommandInteraction) {
     const abierto = favor > contra
     if (abierto) await guardarEstado(true, 'Votación aprobada')
     await mensaje.edit({
-      embeds: [new EmbedBuilder().setTitle(abierto ? 'Servidor abierto' : 'Servidor continúa cerrado')
-        .setDescription(`Resultado: **${favor}** a favor · **${contra}** en contra.`)],
+      embeds: [crearEmbed(abierto ? 'Servidor abierto' : 'Servidor continúa cerrado',
+        `Resultado: **${favor}** a favor · **${contra}** en contra.`, abierto ? coloresEmbed.exito : coloresEmbed.neutro)],
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(siId).setLabel('Votación finalizada').setStyle(ButtonStyle.Secondary).setDisabled(true),
       )],
@@ -94,7 +94,7 @@ async function ejecutarCierre(i: ChatInputCommandInteraction) {
   if (!esStaff(i)) return denegado(i)
   const motivo = i.options.getString('motivo')?.trim() || 'Cierre de jornada.'
   await guardarEstado(false, motivo)
-  return i.reply({ embeds: [new EmbedBuilder().setTitle('Servidor cerrado').setDescription(motivo)], allowedMentions: { parse: [] } })
+  return i.reply({ embeds: [crearEmbed('Servidor cerrado', motivo, coloresEmbed.error)], allowedMentions: { parse: [] } })
 }
 
 async function ejecutarEntorno(i: ChatInputCommandInteraction) {
@@ -119,7 +119,7 @@ async function ejecutarReglas(i: ChatInputCommandInteraction) {
   if (accion === 'ver') {
     const fila = await db.configuracionServidor.findUnique({ where: { clave: 'servidor.alertaReglas' } })
     const texto = typeof fila?.valor === 'string' ? fila.valor : reglasPorDefecto
-    return i.reply({ embeds: [new EmbedBuilder().setTitle('Reglas de alerta').setDescription(texto)], flags: efimero })
+    return i.reply({ embeds: [crearEmbed('Reglas de alerta', texto)], flags: efimero })
   }
   const texto = accion === 'editar' ? i.options.getString('texto', true).trim() : reglasPorDefecto
   await db.configuracionServidor.upsert({

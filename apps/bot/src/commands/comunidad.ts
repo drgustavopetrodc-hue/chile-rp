@@ -5,7 +5,6 @@ import {
   ButtonStyle,
   ChannelType,
   ChatInputCommandInteraction,
-  EmbedBuilder,
   Guild,
   InteractionContextType,
   ModalBuilder,
@@ -20,6 +19,7 @@ import {
 import { CategoriaTicket, db } from '@rp-chile/db'
 import { config } from '../config'
 import { asegurarUsuario } from '../utils/usuarios'
+import { crearEmbed } from '../utils/embeds'
 
 const efimero = MessageFlags.Ephemeral
 
@@ -89,7 +89,7 @@ async function ejecutarTicketPanel(i: ChatInputCommandInteraction) {
   if (!i.channel?.isSendable()) return i.reply({ content: 'No puedo escribir en este canal.', flags: efimero })
   const boton = new ButtonBuilder().setCustomId('ticketpanel:abrir').setLabel('Abrir ticket').setStyle(ButtonStyle.Primary)
   await i.channel.send({
-    embeds: [new EmbedBuilder().setTitle('Centro de soporte').setDescription('Abre un ticket privado para contactar al equipo.')],
+    embeds: [crearEmbed('Centro de soporte', 'Describe tu solicitud y el equipo te responderá en un canal privado.')],
     components: [new ActionRowBuilder<ButtonBuilder>().addComponents(boton)],
   })
   return i.reply({ content: 'Panel de tickets publicado.', flags: efimero })
