@@ -1,9 +1,15 @@
 import {
   ChatInputCommandInteraction,
   InteractionContextType,
+  ContainerBuilder,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
   MessageFlags,
   PermissionFlagsBits,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
   SlashCommandBuilder,
+  TextDisplayBuilder,
 } from 'discord.js'
 import { db } from '@rp-chile/db'
 import { asegurarUsuario } from '../utils/usuarios'
@@ -216,9 +222,21 @@ async function ejecutarArrestar(i: ChatInputCommandInteraction) {
     },
   } })
   return i.editReply({
-    embeds: [crearFichaLegal({ titulo: 'Registro: Encarcelamiento', objetivo, agente, articulo, codigo, fecha, condena, motivo, foto: adjunto.nombre })],
+    components: [crearFichaProcedimiento({
+      titulo: 'Registro: Encarcelamiento',
+      registroId: registro.id,
+      objetivo,
+      agente,
+      articulo,
+      codigo,
+      fecha,
+      condena,
+      motivo,
+      expiraEn: null,
+      foto: adjunto.nombre,
+    })],
     files: [adjunto.archivo],
-    content: `Registro **${registro.id}**`,
+    flags: MessageFlags.IsComponentsV2,
   })
 }
 
@@ -299,9 +317,21 @@ async function ejecutarAntecedente(i: ChatInputCommandInteraction) {
       },
     } })
     return i.editReply({
-      content: `Antecedente registrado. ID: **${antecedente.id}**.`,
-      embeds: [crearFichaLegal({ titulo: 'Registro: Antecedente ciudadano', objetivo: personaje, agente: emisor, articulo, codigo, fecha, condena, motivo, foto: adjunto.nombre })],
+      components: [crearFichaProcedimiento({
+        titulo: 'Registro: Antecedente ciudadano',
+        registroId: antecedente.id,
+        objetivo: personaje,
+        agente: emisor,
+        articulo,
+        codigo,
+        fecha,
+        condena,
+        motivo,
+        expiraEn,
+        foto: adjunto.nombre,
+      })],
       files: [adjunto.archivo],
+      flags: MessageFlags.IsComponentsV2,
     })
   }
 
@@ -378,8 +408,9 @@ function crearCodigoRegistro() {
   return `${Date.now().toString().slice(-9)}${Math.floor(100_000 + Math.random() * 900_000)}`
 }
 
-function crearFichaLegal({
+function crearFichaProcedimiento({
   titulo,
+  registroId,
   objetivo,
   agente,
   articulo,
@@ -387,9 +418,11 @@ function crearFichaLegal({
   fecha,
   condena,
   motivo,
+  expiraEn,
   foto,
 }: {
   titulo: string
+  registroId: string
   objetivo: { nombres: string; apellidos: string; rut: string }
   agente: { nombres: string; apellidos: string }
   articulo: ArticuloPenal
@@ -397,6 +430,7 @@ function crearFichaLegal({
   fecha: Date
   condena: string
   motivo: string
+  expiraEn: Date | null
   foto: string
 }) {
   const fechaLocal = new Intl.DateTimeFormat('es-CL', {
@@ -404,32 +438,29 @@ function crearFichaLegal({
     timeStyle: 'short',
     timeZone: 'America/Santiago',
   }).format(fecha)
+  const vencimiento = expiraEn
+    ? new Intl.DateTimeFormat('es-CL', { dateStyle: 'long', timeZone: 'America/Santiago' }).format(expiraEn)
+    : 'Sin vencimiento'
+  const separador = () => new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
 
-  const descripcion =
-    'Se ha registrado un procedimiento policial en el sistema.\n\n' +
-
-    '**Información Ciudadano**\n' +
-    `• **Nombre:** ${objetivo.nombres} ${objetivo.apellidos}\n` +
-    `• **RUT:** ${objetivo.rut}\n\n` +
-
-    '**Información Funcionario**\n' +
-    `• **Nombre:** ${agente.nombres} ${agente.apellidos}\n\n` +
-
-    '**Información Delito**\n' +
-    `• **Artículo:** ${articulo.numero}\n` +
-    `• **Delito:** ${articulo.delito}\n` +
-    `• **Título:** ${articulo.titulo}\n` +
-    `• **Pena legal:** ${articulo.pena}\n\n` +
-
-    '**Información Registro**\n' +
-    `• **Código Documento:** ${codigo}\n` +
-    `• **Fecha:** ${fechaLocal}\n` +
-    `• **Condena RP:** ${condena}\n` +
-    `• **Motivo:** ${motivo}`
-
-  return crearEmbed(
-    titulo,
-    descripcion,
-    coloresEmbed.aviso
-  )
+  return new ContainerBuilder()
+    .setAccentColor(0xffffff)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${titulo}\n**Código de documento:** ${codigo}\n**ID del registro:** ${registroId}`))
+    .addSeparatorComponents(separador())
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `### Información ciudadana\n> **Nombre:** ${objetivo.nombres} ${objetivo.apellidos}\n> **RUT:** ${objetivo.rut}`,
+    ))
+    .addSeparatorComponents(separador())
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `### Información del agente\n> **Nombre:** ${agente.nombres} ${agente.apellidos}`,
+    ))
+    .addSeparatorComponents(separador())
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `### Delito y marco legal\n> **Artículo ${articulo.numero}:** ${articulo.delito}\n> **Título:** ${articulo.titulo}\n> **Pena legal:** ${articulo.pena}` +
+      `\n\n### Datos del registro\n> **Fecha:** ${fechaLocal}\n> **Condena RP:** ${condena}\n> **Vigencia:** ${vencimiento}\n> **Motivo:** ${motivo}`,
+    ))
+    .addSeparatorComponents(separador())
+    .addMediaGalleryComponents(new MediaGalleryBuilder().addItems(
+      new MediaGalleryItemBuilder().setURL(`attachment://${foto}`).setDescription('Evidencia gráfica del procedimiento'),
+    ))
 }

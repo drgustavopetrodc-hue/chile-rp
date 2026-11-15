@@ -1,14 +1,20 @@
 import {
   ChatInputCommandInteraction,
+  ContainerBuilder,
   InteractionContextType,
   MessageFlags,
   PermissionFlagsBits,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
   SlashCommandBuilder,
+  TextDisplayBuilder,
 } from 'discord.js'
 import { db } from '@rp-chile/db'
 import { asegurarUsuario } from '../utils/usuarios'
+import { comoComponentsV2 } from '../utils/components-v2'
 
 const efimero = MessageFlags.Ephemeral
+const canalCasosId = '1571338831003656303'
 const guildCommand = (name: string, description: string) =>
   new SlashCommandBuilder().setName(name).setDescription(description).setContexts(InteractionContextType.Guild)
 
@@ -112,16 +118,73 @@ async function ejecutarClear(i: ChatInputCommandInteraction) {
 async function ejecutarSancionar(i: ChatInputCommandInteraction) {
   if (!esStaff(i)) return denegado(i)
   const usuario = i.options.getUser('usuario', true)
+  const motivo = i.options.getString('motivo', true)
   const dias = i.options.getInteger('dias')
-  const registro = await registrarCaso(i, usuario.id, 'sancion', i.options.getString('motivo', true), dias)
-  return i.reply({ content: `Sanción registrada para ${usuario.tag}. ID: **${registro.id}**.`, flags: efimero })
+  const registro = await registrarCaso(i, usuario.id, 'sancion', motivo, dias)
+  const detalle = registro.detalle as { venceEn?: string } | null
+  const hilo = await publicarCasoModeracion(i, registro.id, usuario.id, usuario.tag, 'Sanción', motivo, detalle?.venceEn)
+  return i.reply({ content: `Sanción registrada para ${usuario.tag}. ID: **${registro.id}**.${hilo ? ` Evidencia: ${hilo}` : ' No se pudo crear el hilo de evidencia; avisa al staff administrador.'}`, flags: efimero })
 }
 
 async function ejecutarAdvertir(i: ChatInputCommandInteraction) {
   if (!esStaff(i)) return denegado(i)
   const usuario = i.options.getUser('usuario', true)
-  const registro = await registrarCaso(i, usuario.id, 'advertencia', i.options.getString('motivo', true))
-  return i.reply({ content: `Advertencia registrada para ${usuario.tag}. ID: **${registro.id}**.`, flags: efimero })
+  const motivo = i.options.getString('motivo', true)
+  const registro = await registrarCaso(i, usuario.id, 'advertencia', motivo)
+  const hilo = await publicarCasoModeracion(i, registro.id, usuario.id, usuario.tag, 'Advertencia', motivo)
+  return i.reply({ content: `Advertencia registrada para ${usuario.tag}. ID: **${registro.id}**.${hilo ? ` Evidencia: ${hilo}` : ' No se pudo crear el hilo de evidencia; avisa al staff administrador.'}`, flags: efimero })
+}
+
+async function publicarCasoModeracion(
+  i: ChatInputCommandInteraction,
+  registroId: string,
+  usuarioId: string,
+  usuarioTag: string,
+  tipo: 'Sanción' | 'Advertencia',
+  motivo: string,
+  venceEn?: string,
+) {
+  if (!i.inCachedGuild()) return null
+  try {
+    const canal = await i.guild.channels.fetch(canalCasosId)
+    if (!canal?.isTextBased() || !('threads' in canal) || !canal.isSendable()) return null
+    const fecha = new Intl.DateTimeFormat('es-CL', { dateStyle: 'long', timeStyle: 'short', timeZone: 'America/Santiago' }).format(new Date())
+    const container = new ContainerBuilder()
+      .setAccentColor(0xffffff)
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${tipo} emitida`))
+      .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large))
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+        `• **Usuario:** <@${usuarioId}> (${usuarioTag})\n` +
+        `• **Moderador:** <@${i.user.id}>\n` +
+        `• **Tipo:** ${tipo}\n` +
+        `• **Número:** #${registroId.slice(-6)}\n` +
+        `• **Motivo:** ${motivo}\n` +
+        `• **Fecha:** ${fecha}\n` +
+        `• **Vigencia:** ${venceEn ? new Intl.DateTimeFormat('es-CL', { dateStyle: 'long', timeZone: 'America/Santiago' }).format(new Date(venceEn)) : 'Sin vencimiento'}`,
+      ))
+      .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large))
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent('Abre el hilo asociado para adjuntar capturas y otros antecedentes.'))
+    const mensaje = await canal.send(comoComponentsV2({
+      components: [container],
+      flags: MessageFlags.IsComponentsV2,
+      allowedMentions: { users: [usuarioId, i.user.id], parse: [] },
+    }))
+    const hilo = await mensaje.startThread({
+      name: `evidencia-${tipo.toLowerCase()}-${registroId.slice(-8)}`.slice(0, 100),
+      autoArchiveDuration: 1440,
+      reason: `Evidencia del registro de ${tipo.toLowerCase()} ${registroId}`,
+    })
+    await hilo.send(comoComponentsV2({
+      components: [new ContainerBuilder().setAccentColor(0xffffff).addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(`## Evidencia del registro #${registroId.slice(-6)}\nAdjunta aquí capturas o antecedentes relacionados con esta ${tipo.toLowerCase()}.`),
+      )],
+      flags: MessageFlags.IsComponentsV2,
+    }))
+    return hilo
+  } catch (error) {
+    console.error(`No se pudo publicar ${tipo.toLowerCase()} en el canal de casos:`, error)
+    return null
+  }
 }
 
 async function registrarCaso(i: ChatInputCommandInteraction, discordId: string, tipo: 'sancion' | 'advertencia', motivo: string, dias?: number | null) {
