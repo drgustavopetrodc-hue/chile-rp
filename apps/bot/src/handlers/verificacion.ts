@@ -1,5 +1,6 @@
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonInteraction,
   ButtonStyle,
@@ -16,6 +17,8 @@ import { edadEn, formatearFecha, parsearFecha } from '../utils/fechas'
 import { generarNumeroSerie, generarRut } from '../utils/rut'
 import { asegurarUsuario } from '../utils/usuarios'
 import { crearEmbed, coloresEmbed } from '../utils/embeds'
+import { obtenerAvatarRoblox } from '../utils/roblox'
+import { generarImagenCedula } from '../utils/cedula-imagen'
 
 const EFIMERO = MessageFlags.Ephemeral
 const AMARILLO = coloresEmbed.aviso
@@ -27,7 +30,8 @@ interface Respuestas {
   apellidos: string
   nacimiento: string // ISO
   historia: string
-  experiencia: string
+  experiencia?: string
+  robloxUsername?: string
 }
 
 class YaProcesada extends Error {}
@@ -102,8 +106,8 @@ async function mostrarFormulario(i: ButtonInteraction) {
       campo('nombres', 'Nombres del personaje', TextInputStyle.Short, 40),
       campo('apellidos', 'Apellidos del personaje', TextInputStyle.Short, 40),
       campo('nacimiento', 'Fecha de nacimiento (DD/MM/AAAA)', TextInputStyle.Short, 10, '15/03/1995'),
-      campo('historia', 'Historia de tu personaje', TextInputStyle.Paragraph, 1000),
-      campo('experiencia', 'Tu experiencia en roleplay', TextInputStyle.Paragraph, 1000),
+      campo('historia', 'Historia y experiencia de RP', TextInputStyle.Paragraph, 1000),
+      campo('roblox', 'Usuario de Roblox (sin @)', TextInputStyle.Short, 20),
     )
   return i.showModal(modal)
 }
@@ -115,7 +119,7 @@ async function recibirPostulacion(i: ModalSubmitInteraction) {
   const nombres = leer('nombres')
   const apellidos = leer('apellidos')
   const historia = leer('historia')
-  const experiencia = leer('experiencia')
+  const robloxSolicitado = leer('roblox')
 
   const nacimiento = parsearFecha(leer('nacimiento'))
   if (!nacimiento) {
@@ -124,6 +128,9 @@ async function recibirPostulacion(i: ModalSubmitInteraction) {
   const edad = edadEn(nacimiento)
   if (edad < 18 || edad > 90) {
     return i.reply({ content: 'Tu personaje debe tener entre 18 y 90 años.', flags: EFIMERO })
+  }
+  if (!/^[a-zA-Z0-9_]{3,20}$/.test(robloxSolicitado)) {
+    return i.reply({ content: 'El usuario Roblox debe tener entre 3 y 20 letras, números o guiones bajos.', flags: EFIMERO })
   }
 
   const usuario = await asegurarUsuario(i.user)
@@ -135,13 +142,19 @@ async function recibirPostulacion(i: ModalSubmitInteraction) {
   }
 
   await i.deferReply({ flags: EFIMERO })
+  let robloxUsername: string
+  try {
+    robloxUsername = (await obtenerAvatarRoblox(robloxSolicitado)).username
+  } catch (error) {
+    return i.editReply(error instanceof Error ? error.message : 'No se pudo validar el usuario Roblox.')
+  }
 
   const respuestas: Respuestas = {
     nombres,
     apellidos,
     nacimiento: nacimiento.toISOString(),
     historia,
-    experiencia,
+    robloxUsername,
   }
   const postulacion = await db.postulacion.create({
     data: { tipo: 'WHITELIST', usuarioId: usuario.id, respuestas: { ...respuestas } },
@@ -153,8 +166,8 @@ async function recibirPostulacion(i: ModalSubmitInteraction) {
       { name: 'Postulante', value: `${i.user} (${i.user.username})`, inline: true },
       { name: 'Personaje', value: `${nombres} ${apellidos}`, inline: true },
       { name: 'Nacimiento', value: `${formatearFecha(nacimiento)} (${edad} años)`, inline: true },
-      { name: 'Historia', value: historia },
-      { name: 'Experiencia en RP', value: experiencia },
+      { name: 'Usuario Roblox', value: robloxUsername, inline: true },
+      { name: 'Historia y experiencia en RP', value: historia },
     )
     .setFooter({ text: `Postulación ${postulacion.id} · RP Chile` })
 
@@ -216,7 +229,7 @@ async function aprobar(i: ButtonInteraction, id: string) {
           apellidos: r.apellidos,
           rut,
           fechaNacimiento: new Date(r.nacimiento),
-          cedula: { create: { numeroSerie: serie, venceEn: vence } },
+          cedula: { create: { numeroSerie: serie, venceEn: vence, robloxUsername: r.robloxUsername ?? null } },
         },
       })
       await tx.usuario.update({
@@ -238,9 +251,33 @@ async function aprobar(i: ButtonInteraction, id: string) {
     await miembro.roles.add(config.roles.ciudadano).catch(console.error)
     await miembro.roles.remove(config.roles.noVerificado).catch(console.error)
     await miembro.setNickname(`${r.nombres} ${r.apellidos}`.slice(0, 32)).catch(() => {})
-    await miembro
-      .send(`✅ Tu postulación fue **aprobada**. Ya eres ciudadano del servidor.\nTu RUT: **${rut}**. Usa \`/cedula\` para ver tu cédula.`)
-      .catch(() => {})
+    const personaje = await db.personaje.findUnique({ where: { rut }, include: { cedula: true } })
+    if (personaje?.cedula?.robloxUsername) {
+      try {
+        const roblox = await obtenerAvatarRoblox(personaje.cedula.robloxUsername)
+        const png = await generarImagenCedula({
+          nombres: personaje.nombres,
+          apellidos: personaje.apellidos,
+          rut: personaje.rut,
+          nacionalidad: personaje.nacionalidad,
+          nacimiento: personaje.fechaNacimiento,
+          robloxUsername: roblox.username,
+          numeroSerie: personaje.cedula.numeroSerie,
+          emitidaEn: personaje.cedula.emitidaEn,
+          venceEn: personaje.cedula.venceEn,
+          avatar: roblox.avatar,
+        })
+        await miembro.send({
+          content: `✅ Tu postulación fue **aprobada**. Ya eres ciudadano. RUT: **${rut}**.`,
+          files: [new AttachmentBuilder(png, { name: `cedula-${rut.replace(/[^a-zA-Z0-9]/g, '')}.png` })],
+        })
+      } catch (error) {
+        console.error('No se pudo enviar la cédula gráfica:', error)
+        await miembro.send(`✅ Tu postulación fue **aprobada**. RUT: **${rut}**. Usa \`/cedula mostrar\` para recuperar tu cédula gráfica.`).catch(() => {})
+      }
+    } else {
+      await miembro.send(`✅ Tu postulación fue **aprobada**. RUT: **${rut}**. Usa \`/cedula vincular\` para completar tu cédula con Roblox.`).catch(() => {})
+    }
   }
 
   await actualizarMensaje(i, VERDE, `✅ Aprobada por ${i.user} — RUT asignado: ${rut}`)

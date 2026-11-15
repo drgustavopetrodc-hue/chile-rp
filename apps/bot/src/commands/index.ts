@@ -20,10 +20,11 @@ import * as verificacion from './verificacion'
 import { configuracion as comandosConfiguracion } from './configuracion'
 import { owner } from './owner'
 import { ownerManagement } from './owner-manage'
+import { codigoPenal } from './codigo-penal'
 
 interface Comando {
   data: Pick<SlashCommandBuilder, 'name' | 'toJSON'>
   execute: (i: ChatInputCommandInteraction) => Promise<unknown>
 }
 
-export const comandos: Comando[] = [panelVerificacion, verificacion, cedula, crearDni2do, ...legales, ...moderacion, ...comunidad, ...economia, casino, ...vehiculos, item, sueldo, ...instituciones, ...servidor, staff, contenido, agregarDinero, bienvenida, ...comandosConfiguracion, ...owner, ...ownerManagement]
+export const comandos: Comando[] = [panelVerificacion, verificacion, cedula, crearDni2do, ...legales, ...moderacion, ...comunidad, ...economia, casino, ...vehiculos, item, sueldo, ...instituciones, ...servidor, staff, contenido, agregarDinero, bienvenida, ...comandosConfiguracion, ...owner, ...ownerManagement, codigoPenal]

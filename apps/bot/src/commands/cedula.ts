@@ -1,4 +1,5 @@
 import {
+  AttachmentBuilder,
   ChatInputCommandInteraction,
   InteractionContextType,
   MessageFlags,
@@ -8,8 +9,11 @@ import {
 import { db } from '@rp-chile/db'
 import { config } from '../config'
 import { crearPersonaje } from '../utils/personajes'
-import { formatearFecha, parsearFecha } from '../utils/fechas'
+import { parsearFecha } from '../utils/fechas'
 import { crearEmbed, coloresEmbed } from '../utils/embeds'
+import { obtenerAvatarRoblox, RobloxLookupError } from '../utils/roblox'
+import { generarImagenCedula } from '../utils/cedula-imagen'
+import { formatearFecha } from '../utils/fechas'
 
 export const data = new SlashCommandBuilder()
   .setName('cedula')
@@ -21,7 +25,8 @@ export const data = new SlashCommandBuilder()
       .setDescription('Crea tu personaje y cédula')
       .addStringOption((o) => o.setName('nombres').setDescription('Nombres').setRequired(true).setMaxLength(40))
       .addStringOption((o) => o.setName('apellidos').setDescription('Apellidos').setRequired(true).setMaxLength(40))
-      .addStringOption((o) => o.setName('nacimiento').setDescription('Fecha DD/MM/AAAA').setRequired(true)),
+      .addStringOption((o) => o.setName('nacimiento').setDescription('Fecha DD/MM/AAAA').setRequired(true))
+      .addStringOption((o) => o.setName('roblox').setDescription('Usuario de Roblox, sin @').setRequired(true).setMaxLength(20)),
   )
   .addSubcommand((s) =>
     s
@@ -29,6 +34,8 @@ export const data = new SlashCommandBuilder()
       .setDescription('Muestra una cédula')
       .addUserOption((o) => o.setName('usuario').setDescription('Ciudadano (por defecto, tú)')),
   )
+  .addSubcommand((s) => s.setName('vincular').setDescription('Vincula tu usuario Roblox y genera tu cédula gráfica')
+    .addStringOption((o) => o.setName('roblox').setDescription('Usuario de Roblox, sin @').setRequired(true).setMaxLength(20)))
   .addSubcommand((s) =>
     s
       .setName('buscar')
@@ -56,6 +63,25 @@ export async function execute(i: ChatInputCommandInteraction) {
   const accion = i.options.getSubcommand()
   const objetivo = i.options.getUser('usuario')
 
+  if (accion === 'vincular') {
+    const personaje = await db.personaje.findFirst({
+      where: { activo: true, usuario: { discordId: i.user.id } },
+      include: { cedula: true },
+      orderBy: { creadoEn: 'asc' },
+    })
+    if (!personaje?.cedula) return i.reply({ content: 'No tienes un personaje con cédula activa.', flags: MessageFlags.Ephemeral })
+    await i.deferReply({ flags: MessageFlags.Ephemeral })
+    let roblox: Awaited<ReturnType<typeof obtenerAvatarRoblox>>
+    try {
+      roblox = await obtenerAvatarRoblox(i.options.getString('roblox', true))
+    } catch (error) {
+      if (error instanceof RobloxLookupError) return i.editReply(error.message)
+      throw error
+    }
+    const cedula = await db.cedula.update({ where: { id: personaje.cedula.id }, data: { robloxUsername: roblox.username } })
+    return publicarImagenCedula(i, { ...personaje, cedula }, roblox.avatar, true)
+  }
+
   if (accion === 'crear') {
     const nacimiento = parsearFecha(i.options.getString('nacimiento', true))
     if (!nacimiento) return i.reply({ content: 'Fecha inválida. Usa DD/MM/AAAA.', flags: MessageFlags.Ephemeral })
@@ -67,13 +93,24 @@ export async function execute(i: ChatInputCommandInteraction) {
     if (cantidad > 0) {
       return i.reply({ content: 'Ya tienes un personaje. El segundo requiere `/crear-dni-2do` y su rol correspondiente.', flags: MessageFlags.Ephemeral })
     }
+    await i.deferReply()
+    let roblox: Awaited<ReturnType<typeof obtenerAvatarRoblox>>
+    try {
+      roblox = await obtenerAvatarRoblox(i.options.getString('roblox', true))
+    } catch (error) {
+      if (error instanceof RobloxLookupError) return i.editReply(error.message)
+      throw error
+    }
     const personaje = await crearPersonaje(
       i.user,
       i.options.getString('nombres', true),
       i.options.getString('apellidos', true),
       nacimiento,
+      roblox.username,
     )
-    return i.reply({ content: `Cédula creada para **${personaje.nombres} ${personaje.apellidos}**. RUT: **${personaje.rut}**.` })
+    const cedulaCreada = personaje.cedula
+    if (!cedulaCreada) return i.editReply('El personaje se creó, pero no se pudo cargar su cédula. Contacta al staff.')
+    return publicarImagenCedula(i, { ...personaje, cedula: cedulaCreada }, roblox.avatar, false)
   }
 
   if (accion === 'editar' || accion === 'eliminar') {
@@ -125,22 +162,59 @@ export async function execute(i: ChatInputCommandInteraction) {
       flags: MessageFlags.Ephemeral,
     })
   }
+  if (!persona.cedula.robloxUsername) {
+    return i.reply({ content: 'Esta cédula aún no tiene usuario Roblox. El titular puede usar `/cedula vincular` para generar la versión gráfica.', flags: MessageFlags.Ephemeral })
+  }
+  await i.deferReply(accion === 'buscar' ? { flags: MessageFlags.Ephemeral } : undefined)
+  try {
+    const roblox = await obtenerAvatarRoblox(persona.cedula.robloxUsername)
+    return publicarImagenCedula(i, { ...persona, cedula: persona.cedula }, roblox.avatar, accion === 'buscar')
+  } catch (error) {
+    if (error instanceof RobloxLookupError) return i.editReply(`No pude recuperar el avatar de Roblox: ${error.message}`)
+    throw error
+  }
+}
 
-  const c = persona.cedula
-  const embed = crearEmbed('Cédula de identidad', 'Documento oficial del personaje.', coloresEmbed.principal)
-    .setThumbnail(i.client.users.cache.get(persona.usuario.discordId)?.displayAvatarURL() ?? null)
+export async function publicarImagenCedula(
+  i: ChatInputCommandInteraction,
+  personaje: {
+    nombres: string
+    apellidos: string
+    rut: string
+    nacionalidad: string
+    fechaNacimiento: Date
+    cedula: { numeroSerie: string; robloxUsername: string | null; emitidaEn: Date; venceEn: Date; estado: string }
+  },
+  avatar: Buffer,
+  efimero: boolean,
+) {
+  if (!personaje.cedula.robloxUsername) return i.editReply('La cédula no tiene usuario Roblox vinculado.')
+  const png = await generarImagenCedula({
+    nombres: personaje.nombres,
+    apellidos: personaje.apellidos,
+    rut: personaje.rut,
+    nacionalidad: personaje.nacionalidad,
+    nacimiento: personaje.fechaNacimiento,
+    robloxUsername: personaje.cedula.robloxUsername,
+    numeroSerie: personaje.cedula.numeroSerie,
+    emitidaEn: personaje.cedula.emitidaEn,
+    venceEn: personaje.cedula.venceEn,
+    avatar,
+  })
+  const nombreArchivo = `cedula-${personaje.rut.replace(/[^a-zA-Z0-9]/g, '')}.png`
+  const embed = crearEmbed('Cédula de identidad', `Documento gráfico de **${personaje.nombres} ${personaje.apellidos}**.`, coloresEmbed.principal)
     .addFields(
-      { name: 'Nombres', value: persona.nombres, inline: true },
-      { name: 'Apellidos', value: persona.apellidos, inline: true },
-      { name: 'RUT', value: persona.rut, inline: true },
-      { name: 'Nacionalidad', value: persona.nacionalidad, inline: true },
-      { name: 'Nacimiento', value: formatearFecha(persona.fechaNacimiento), inline: true },
-      { name: 'N° de serie', value: c.numeroSerie, inline: true },
-      { name: 'Emisión', value: formatearFecha(c.emitidaEn), inline: true },
-      { name: 'Vencimiento', value: formatearFecha(c.venceEn), inline: true },
-      { name: 'Estado', value: c.estado, inline: true },
+      { name: 'RUT', value: personaje.rut, inline: true },
+      { name: 'Roblox', value: personaje.cedula.robloxUsername, inline: true },
+      { name: 'Estado', value: personaje.cedula.estado, inline: true },
+      { name: 'Vencimiento', value: formatearFecha(personaje.cedula.venceEn), inline: true },
     )
-  return i.reply({ embeds: [embed], ...(accion === 'buscar' && { flags: MessageFlags.Ephemeral }) })
+    .setImage(`attachment://${nombreArchivo}`)
+  return i.editReply({
+    embeds: [embed],
+    files: [new AttachmentBuilder(png, { name: nombreArchivo })],
+    ...(efimero && { allowedMentions: { parse: [] } }),
+  })
 }
 
 function esStaff(i: ChatInputCommandInteraction) {

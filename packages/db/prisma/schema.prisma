@@ -249,13 +249,14 @@ model MovimientoEconomia {
 }
 
 model Cedula {
-  id          String          @id @default(cuid())
-  personajeId String          @unique
-  personaje   Personaje       @relation(fields: [personajeId], references: [id], onDelete: Cascade)
-  numeroSerie String          @unique
-  emitidaEn   DateTime        @default(now())
-  venceEn     DateTime
-  estado      EstadoDocumento @default(VIGENTE)
+  id             String          @id @default(cuid())
+  personajeId    String          @unique
+  personaje      Personaje       @relation(fields: [personajeId], references: [id], onDelete: Cascade)
+  numeroSerie    String          @unique
+  robloxUsername String?
+  emitidaEn      DateTime        @default(now())
+  venceEn        DateTime
+  estado         EstadoDocumento @default(VIGENTE)
 
   @@map("cedulas")
 }

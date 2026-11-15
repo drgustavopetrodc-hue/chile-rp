@@ -16,7 +16,8 @@ const efimero = MessageFlags.Ephemeral
 const reglasPorDefecto = 'Respeta las reglas del servidor, mantén el rol y trata a los demás con respeto.'
 const guildCommand = (name: string, description: string) => new SlashCommandBuilder().setName(name).setDescription(description).setContexts(InteractionContextType.Guild)
 
-const aperturaData = guildCommand('apertura', 'Inicia una votación para abrir el servidor')
+const aperturaData = guildCommand('apertura', 'Vota para abrir el servidor, con plazo máximo de 30 minutos')
+  .addIntegerOption((o) => o.setName('meta').setDescription('Votos favorables necesarios para abrir').setRequired(true).setMinValue(1).setMaxValue(500))
 const abrirData = guildCommand('abrir', 'Marca el servidor como abierto')
 const cerrarData = guildCommand('cerrar', 'Marca el servidor como cerrado')
 const cierreData = guildCommand('cierre', 'Anuncia el cierre del servidor')
@@ -45,37 +46,44 @@ export const servidor = [
 async function ejecutarApertura(i: ChatInputCommandInteraction) {
   if (!esStaff(i)) return denegado(i)
   if (!i.channel?.isSendable()) return i.reply({ content: 'No puedo publicar la votación en este canal.', flags: efimero })
+  const meta = i.options.getInteger('meta', true)
+  const plazoMs = 30 * 60_000
+  const inicio = Date.now()
   const siId = `apertura:si:${i.id}`
   const noId = `apertura:no:${i.id}`
   const botones = () => new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(siId).setLabel('Abrir').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(noId).setLabel('Mantener cerrado').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(siId).setLabel('Votar a favor').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(noId).setLabel('Votar en contra').setStyle(ButtonStyle.Secondary),
   )
+  await guardarEstado(false, 'Votación de apertura en curso')
   const mensaje = await i.reply({
-    embeds: [crearEmbed('Votación de apertura', 'La comunidad tiene 60 segundos para votar.', coloresEmbed.aviso)],
+    embeds: [crearEmbed('Votación de apertura', `Meta: **${meta} votos favorables**.\nPlazo máximo: **30 minutos**.\nEl servidor permanecerá cerrado hasta alcanzar la meta.`, coloresEmbed.aviso)],
     components: [botones()],
     fetchReply: true,
   })
   const votos = new Map<string, boolean>()
-  const collector = mensaje.createMessageComponentCollector({ time: 60_000 })
+  const collector = mensaje.createMessageComponentCollector({ time: plazoMs })
   collector.on('collect', async (boton) => {
     if (boton.customId !== siId && boton.customId !== noId) return
     votos.set(boton.user.id, boton.customId === siId)
     const favor = [...votos.values()].filter(Boolean).length
     const contra = votos.size - favor
+    const minutosRestantes = Math.ceil(Math.max(0, plazoMs - (Date.now() - inicio)) / 60_000)
     await boton.update({
-      embeds: [crearEmbed('Votación de apertura', `A favor: **${favor}** · En contra: **${contra}**\nCierra en 60 segundos.`, coloresEmbed.aviso)],
+      embeds: [crearEmbed('Votación de apertura', `A favor: **${favor}/${meta}** · En contra: **${contra}**\nTiempo restante: **${minutosRestantes} min**.`, coloresEmbed.aviso)],
       components: [botones()],
     })
+    if (favor >= meta) collector.stop('meta')
   })
-  collector.on('end', async () => {
+  collector.on('end', async (_recogidas, motivo) => {
     const favor = [...votos.values()].filter(Boolean).length
     const contra = votos.size - favor
-    const abierto = favor > contra
+    const abierto = motivo === 'meta' && favor >= meta
     if (abierto) await guardarEstado(true, 'Votación aprobada')
     await mensaje.edit({
-      embeds: [crearEmbed(abierto ? 'Servidor abierto' : 'Servidor continúa cerrado',
-        `Resultado: **${favor}** a favor · **${contra}** en contra.`, abierto ? coloresEmbed.exito : coloresEmbed.neutro)],
+      embeds: [crearEmbed(abierto ? 'Meta alcanzada · servidor abierto' : 'Plazo finalizado · servidor cerrado',
+        `Votos favorables: **${favor}/${meta}** · En contra: **${contra}**.${abierto ? '' : '\nNo se alcanzó la meta dentro de los 30 minutos.'}`,
+        abierto ? coloresEmbed.exito : coloresEmbed.neutro)],
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(siId).setLabel('Votación finalizada').setStyle(ButtonStyle.Secondary).setDisabled(true),
       )],

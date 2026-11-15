@@ -3,7 +3,7 @@ import { db } from '@rp-chile/db'
 import { generarNumeroSerie, generarRut } from './rut'
 import { asegurarUsuario } from './usuarios'
 
-export async function crearPersonaje(user: User, nombres: string, apellidos: string, fechaNacimiento: Date) {
+export async function crearPersonaje(user: User, nombres: string, apellidos: string, fechaNacimiento: Date, robloxUsername: string) {
   const usuario = await asegurarUsuario(user)
   let rut = generarRut()
   while (await db.personaje.findUnique({ where: { rut } })) rut = generarRut()
@@ -19,7 +19,8 @@ export async function crearPersonaje(user: User, nombres: string, apellidos: str
       apellidos: apellidos.trim(),
       rut,
       fechaNacimiento,
-      cedula: { create: { numeroSerie, venceEn } },
+      cedula: { create: { numeroSerie, venceEn, robloxUsername } },
     },
+    include: { cedula: true },
   })
 }

@@ -10,6 +10,8 @@ import { asegurarUsuario } from '../utils/usuarios'
 import { generarNumeroSerie } from '../utils/rut'
 import { crearEmbed, coloresEmbed } from '../utils/embeds'
 import { formatearMoneda } from '../utils/moneda'
+import { cargarImagenDiscord } from '../utils/adjuntos'
+import { ArticuloPenal, CODIGO_PENAL } from '../data/codigo-penal'
 
 const efimero = MessageFlags.Ephemeral
 
@@ -34,10 +36,13 @@ export const multarData = new SlashCommandBuilder()
 
 export const arrestarData = new SlashCommandBuilder()
   .setName('arrestar')
-  .setDescription('Registra el arresto de un ciudadano')
+  .setDescription('Registra un arresto con artículo penal y evidencia')
   .setContexts(InteractionContextType.Guild)
   .addUserOption((o) => o.setName('usuario').setDescription('Ciudadano').setRequired(true))
-  .addStringOption((o) => o.setName('motivo').setDescription('Motivo del arresto').setRequired(true).setMaxLength(500))
+  .addStringOption((o) => o.setName('articulo').setDescription('Número de artículo penal, por ejemplo 103 o 46.1').setRequired(true).setMaxLength(10))
+  .addStringOption((o) => o.setName('condena').setDescription('Condena RP aplicada, por ejemplo 5 minutos').setRequired(true).setMaxLength(100))
+  .addStringOption((o) => o.setName('motivo').setDescription('Motivo y detalles del procedimiento').setRequired(true).setMaxLength(500))
+  .addAttachmentOption((o) => o.setName('foto').setDescription('Captura del arresto en el juego').setRequired(true))
 
 export const liberarData = new SlashCommandBuilder()
   .setName('liberar')
@@ -58,9 +63,12 @@ export const antecedenteData = new SlashCommandBuilder()
   .addSubcommand((s) =>
     s
       .setName('registrar')
-      .setDescription('Registra un antecedente')
+      .setDescription('Registra un antecedente con artículo penal y evidencia')
       .addUserOption((o) => o.setName('usuario').setDescription('Ciudadano').setRequired(true))
       .addStringOption((o) => o.setName('descripcion').setDescription('Descripción').setRequired(true).setMaxLength(500))
+      .addStringOption((o) => o.setName('articulo').setDescription('Número de artículo penal, por ejemplo 103 o 46.1').setRequired(true).setMaxLength(10))
+      .addStringOption((o) => o.setName('condena').setDescription('Condena RP aplicada').setRequired(true).setMaxLength(100))
+      .addAttachmentOption((o) => o.setName('foto').setDescription('Captura del procedimiento en el juego').setRequired(true))
       .addIntegerOption((o) => o.setName('dias').setDescription('Días hasta su expiración').setMinValue(1).setMaxValue(3650)),
   )
   .addSubcommand((s) =>
@@ -179,18 +187,39 @@ async function ejecutarMultar(i: ChatInputCommandInteraction) {
 async function ejecutarArrestar(i: ChatInputCommandInteraction) {
   if (!esPolicia(i)) return i.reply({ content: 'Este comando requiere rol policial o staff.', flags: efimero })
   const objetivo = await personajeDe(i.options.getUser('usuario', true).id)
-  if (!objetivo) return i.reply({ content: 'El ciudadano no tiene un personaje activo.', flags: efimero })
+  const agente = await personajeDe(i.user.id)
+  if (!objetivo || !agente) return i.reply({ content: 'El ciudadano y el agente deben tener un personaje activo.', flags: efimero })
+  const articulo = buscarArticulo(i.options.getString('articulo', true))
+  if (!articulo) return i.reply({ content: 'Artículo penal inexistente. Consulta `/codigo-penal buscar`.', flags: efimero })
   const ultimo = await db.auditoria.findFirst({ where: { entidad: 'Arresto', entidadId: objetivo.id }, orderBy: { creadaEn: 'desc' } })
   if (ultimo?.accion === 'arresto.registrar') return i.reply({ content: 'Ese personaje ya tiene un arresto activo.', flags: efimero })
+  await i.deferReply()
+  const adjunto = await cargarImagenDiscord(i.options.getAttachment('foto', true))
+  if ('error' in adjunto) return i.editReply({ content: adjunto.error ?? 'No se pudo validar la imagen.' })
+  const motivo = i.options.getString('motivo', true).trim()
+  const condena = i.options.getString('condena', true).trim()
+  const codigo = crearCodigoRegistro()
+  const fecha = new Date()
   const actor = await asegurarUsuario(i.user)
   const registro = await db.auditoria.create({ data: {
     actorId: actor.id,
     accion: 'arresto.registrar',
     entidad: 'Arresto',
     entidadId: objetivo.id,
-    detalle: { motivo: i.options.getString('motivo', true) },
+    detalle: {
+      motivo,
+      condena,
+      codigo,
+      fecha: fecha.toISOString(),
+      articulo: { numero: articulo.numero, delito: articulo.delito, titulo: articulo.titulo, pena: articulo.pena },
+      fotoUrl: i.options.getAttachment('foto', true).url,
+    },
   } })
-  return i.reply({ content: `Arresto registrado para **${objetivo.nombres} ${objetivo.apellidos}**. ID: **${registro.id}**.` })
+  return i.editReply({
+    embeds: [crearFichaLegal({ titulo: 'Registro: Encarcelamiento', objetivo, agente, articulo, codigo, fecha, condena, motivo, foto: adjunto.nombre })],
+    files: [adjunto.archivo],
+    content: `Registro **${registro.id}**`,
+  })
 }
 
 async function ejecutarLiberar(i: ChatInputCommandInteraction) {
@@ -237,12 +266,43 @@ async function ejecutarAntecedente(i: ChatInputCommandInteraction) {
     const personaje = await personajeDe(usuarioObjetivo.id)
     const emisor = await personajeDe(i.user.id)
     if (!personaje || !emisor) return i.reply({ content: 'El emisor y el ciudadano deben tener un personaje activo.', flags: efimero })
+    const articulo = buscarArticulo(i.options.getString('articulo', true))
+    if (!articulo) return i.reply({ content: 'Artículo penal inexistente. Consulta `/codigo-penal buscar`.', flags: efimero })
+    await i.deferReply()
+    const adjunto = await cargarImagenDiscord(i.options.getAttachment('foto', true))
+    if ('error' in adjunto) return i.editReply({ content: adjunto.error ?? 'No se pudo validar la imagen.' })
     const dias = i.options.getInteger('dias')
     const expiraEn = dias ? new Date(Date.now() + dias * 86_400_000) : null
-    const antecedente = await db.antecedente.create({
-      data: { personajeId: personaje.id, descripcion: i.options.getString('descripcion', true), expiraEn },
+    const motivo = i.options.getString('descripcion', true).trim()
+    const condena = i.options.getString('condena', true).trim()
+    const codigo = crearCodigoRegistro()
+    const fecha = new Date()
+    const antecedente = await db.antecedente.create({ data: {
+      personajeId: personaje.id,
+      descripcion: `Art. ${articulo.numero} · ${articulo.delito}: ${motivo}`,
+      expiraEn,
+    } })
+    const actor = await asegurarUsuario(i.user)
+    await db.auditoria.create({ data: {
+      actorId: actor.id,
+      accion: 'antecedente.registrar',
+      entidad: 'Antecedente',
+      entidadId: antecedente.id,
+      detalle: {
+        motivo,
+        condena,
+        codigo,
+        fecha: fecha.toISOString(),
+        articulo: { numero: articulo.numero, delito: articulo.delito, titulo: articulo.titulo, pena: articulo.pena },
+        fotoUrl: i.options.getAttachment('foto', true).url,
+        expiraEn: expiraEn?.toISOString() ?? null,
+      },
+    } })
+    return i.editReply({
+      content: `Antecedente registrado. ID: **${antecedente.id}**.`,
+      embeds: [crearFichaLegal({ titulo: 'Registro: Antecedente ciudadano', objetivo: personaje, agente: emisor, articulo, codigo, fecha, condena, motivo, foto: adjunto.nombre })],
+      files: [adjunto.archivo],
     })
-    return i.reply({ content: `Antecedente registrado. ID: **${antecedente.id}**.` })
   }
 
   if (accion === 'listar') {
@@ -307,4 +367,49 @@ function esPolicia(i: ChatInputCommandInteraction) {
   if (!i.inCachedGuild()) return false
   return i.member.roles.cache.has(process.env.ROL_STAFF_ID ?? '') ||
     (!!process.env.ROL_POLICIA_ID && i.member.roles.cache.has(process.env.ROL_POLICIA_ID))
+}
+
+function buscarArticulo(valor: string) {
+  const numero = Number(valor.trim().replace(/^art(?:ículo)?\.?\s*/i, ''))
+  return Number.isFinite(numero) ? CODIGO_PENAL.find((articulo) => articulo.numero === numero) : undefined
+}
+
+function crearCodigoRegistro() {
+  return `${Date.now().toString().slice(-9)}${Math.floor(100_000 + Math.random() * 900_000)}`
+}
+
+function crearFichaLegal({
+  titulo,
+  objetivo,
+  agente,
+  articulo,
+  codigo,
+  fecha,
+  condena,
+  motivo,
+  foto,
+}: {
+  titulo: string
+  objetivo: { nombres: string; apellidos: string; rut: string }
+  agente: { nombres: string; apellidos: string }
+  articulo: ArticuloPenal
+  codigo: string
+  fecha: Date
+  condena: string
+  motivo: string
+  foto: string
+}) {
+  const fechaLocal = new Intl.DateTimeFormat('es-CL', {
+    dateStyle: 'long',
+    timeStyle: 'short',
+    timeZone: 'America/Santiago',
+  }).format(fecha)
+  return crearEmbed(titulo, 'La entidad responsable registró el procedimiento. La evidencia gráfica se adjunta al documento.', coloresEmbed.aviso)
+    .addFields(
+      { name: 'Información Ciudadano', value: `• **Nombre:** ${objetivo.nombres} ${objetivo.apellidos}\n• **RUT:** ${objetivo.rut}` },
+      { name: 'Información Agente', value: `• **Nombre:** ${agente.nombres} ${agente.apellidos}` },
+      { name: 'Delito Imputado', value: `• **Artículo ${articulo.numero}:** ${articulo.delito}\n• **Título:** ${articulo.titulo}\n• **Pena legal:** ${articulo.pena}` },
+      { name: 'Información Registro', value: `• **Código Documento:** ${codigo}\n• **Fecha:** ${fechaLocal}\n• **Condena RP:** ${condena}\n• **Motivo:** ${motivo}` },
+    )
+    .setImage(`attachment://${foto}`)
 }

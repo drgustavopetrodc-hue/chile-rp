@@ -7,6 +7,7 @@
     "deploy-commands": "tsx src/deploy-commands.ts"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.1.1",
     "@rp-chile/db": "*",
     "discord.js": "^14.16.0",
     "dotenv": "^16.4.5",
