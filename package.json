@@ -10,5 +10,5 @@
     "bot:start": "npm run start -w @rp-chile/bot",
     "bot:deploy-commands": "npm run deploy-commands -w @rp-chile/bot"
   },
-  "engines": { "node": ">=20.19" }
+  "engines": { "node": ">=22.0.0" }
 }
