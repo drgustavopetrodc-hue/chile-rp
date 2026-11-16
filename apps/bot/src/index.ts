@@ -2,6 +2,7 @@ import { Client, Events, GatewayIntentBits, MessageFlags } from 'discord.js'
 import { config } from './config'
 import { comandos } from './commands'
 import { manejarBoton, manejarModal } from './handlers/verificacion'
+import { manejarMencionIA } from './commands/ia'
 import { asegurarUsuario } from './utils/usuarios'
 import { enviarBienvenida } from './commands/bienvenida'
 import { manejarBotonTicket, manejarModalTicket } from './commands/comunidad'
@@ -26,6 +27,17 @@ client.once(Events.ClientReady, async (c) => {
 
 client.on(Events.MessageCreate, (mensaje) => {
   void manejarAutoReaccion(mensaje)
+  if (mensaje.author.bot || !client.user || !mensaje.mentions.has(client.user)) return
+  void (async () => {
+    if (!await usuarioPuedeUsarComando('ia', mensaje.author.id)) {
+      await mensaje.reply({
+        content: 'Debes completar la verificación antes de usar este comando.',
+        allowedMentions: { repliedUser: false },
+      })
+      return
+    }
+    await manejarMencionIA(mensaje)
+  })().catch((err) => console.error('No se pudo responder a la mención de la IA:', err))
 })
 
 // Al entrar al servidor: se registra el usuario y se le da el rol "No verificado".
@@ -34,10 +46,10 @@ client.on(Events.GuildMemberAdd, async (miembro) => {
   try {
     await asegurarUsuario(miembro.user)
     await miembro.roles.add(config.roles.noVerificado)
-    await enviarBienvenida(miembro)
   } catch (err) {
-    console.error('Error al recibir a un nuevo miembro:', err)
+    console.error('No se pudo registrar al nuevo miembro o asignar el rol inicial:', err)
   }
+  await enviarBienvenida(miembro)
 })
 
 client.on(Events.InteractionCreate, async (i) => {

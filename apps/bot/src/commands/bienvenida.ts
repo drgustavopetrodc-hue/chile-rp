@@ -61,7 +61,14 @@ export async function enviarBienvenida(miembro: GuildMember) {
   const config = fila?.valor as { habilitado?: boolean; canalId?: string } | undefined
   if (!config?.habilitado || !config.canalId) return
   if (!miembro.joinedTimestamp) return
-  const canal = await miembro.guild.channels.fetch(config.canalId)
+  const canal = await miembro.guild.channels.fetch(config.canalId).catch((error: unknown) => {
+    if (esCanalInexistente(error)) {
+      console.warn('El canal de bienvenida guardado no existe o no es accesible; actualízalo con /bienvenida activar.')
+    } else {
+      console.error('No se pudo consultar el canal de bienvenida:', error)
+    }
+    return null
+  })
   if (!canal?.isTextBased() || !('send' in canal)) return
   const plantilla = await obtenerMensaje()
   const usuario = await db.usuario.findUnique({ where: { discordId: miembro.id }, select: { id: true } })
@@ -75,7 +82,11 @@ export async function enviarBienvenida(miembro: GuildMember) {
     data: { bienvenidaEventoKey: eventoKey },
   })
   if (!reclamo.count) return
-  await enviarComponentsV2(canal, { content: renderizar(plantilla, miembro.id, miembro.guild.name), allowedMentions: { users: [miembro.id], parse: [] } })
+  try {
+    await enviarComponentsV2(canal, { content: renderizar(plantilla, miembro.id, miembro.guild.name), allowedMentions: { users: [miembro.id], parse: [] } })
+  } catch (error) {
+    console.error('No se pudo enviar el mensaje de bienvenida:', error)
+  }
 }
 
 async function obtenerMensaje() {
@@ -98,4 +109,8 @@ function renderizar(plantilla: string, usuarioId: string, servidor: string) {
 function esAdmin(i: ChatInputCommandInteraction) {
   if (i.memberPermissions?.has(PermissionFlagsBits.Administrator)) return true
   return !!i.inCachedGuild() && !!process.env.ROL_ADMIN_ID && i.member.roles.cache.has(process.env.ROL_ADMIN_ID)
+}
+
+function esCanalInexistente(error: unknown) {
+  return typeof error === 'object' && error !== null && 'code' in error && Number(error.code) === 10003
 }

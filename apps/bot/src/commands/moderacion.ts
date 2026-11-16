@@ -182,9 +182,17 @@ async function publicarCasoModeracion(
     }))
     return hilo
   } catch (error) {
-    console.error(`No se pudo publicar ${tipo.toLowerCase()} en el canal de casos:`, error)
+    if (esCanalInexistente(error)) {
+      console.warn(`CANAL_CASOS_MODERACION_ID apunta a un canal inexistente o inaccesible; no se publicó ${tipo.toLowerCase()}.`)
+    } else {
+      console.error(`No se pudo publicar ${tipo.toLowerCase()} en el canal de casos:`, error)
+    }
     return null
   }
+}
+
+function esCanalInexistente(error: unknown) {
+  return typeof error === 'object' && error !== null && 'code' in error && Number(error.code) === 10003
 }
 
 async function registrarCaso(i: ChatInputCommandInteraction, discordId: string, tipo: 'sancion' | 'advertencia', motivo: string, dias?: number | null) {
