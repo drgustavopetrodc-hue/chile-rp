@@ -22,7 +22,7 @@ En `apps/bot/src/commands/index.ts` agrega estas dos cosas:
 
 ## 3. Conseguir las claves (gratis)
 - **Gemini (principal):** entra a https://aistudio.google.com/apikey, inicia sesión con tu cuenta de Google y pulsa "Create API key". Copia la clave en `GEMINI_API_KEY`.
-- **Groq (respaldo):** https://console.groq.com/keys → "Create API Key" → `GROQ_API_KEY`.
+- **Groq (respaldo):** https://console.groq.com/keys → "Create API Key" → `GROQ_API_KEY`. El modelo predeterminado es `openai/gpt-oss-120b`.
 - Con una sola clave ya funciona. Con las dos, si Gemini agota su cupo el bot pasa a Groq automáticamente.
 
 Las claves van en `apps/bot/.env` (y en *Variables* de Railway). Nunca las subas a GitHub.

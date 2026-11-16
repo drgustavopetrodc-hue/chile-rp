@@ -53,7 +53,7 @@ export function proveedoresConfigurados(): Proveedor[] {
       nombre: 'Groq',
       base: e.GROQ_BASE_URL || 'https://api.groq.com/openai/v1',
       clave: e.GROQ_API_KEY,
-      modelo: e.GROQ_MODEL || 'llama-3.3-70b-versatile',
+      modelo: e.GROQ_MODEL || 'openai/gpt-oss-120b',
     })
   }
   if (e.OPENROUTER_API_KEY) {
