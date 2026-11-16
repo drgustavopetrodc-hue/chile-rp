@@ -4,12 +4,16 @@ import {
   ButtonBuilder,
   ButtonInteraction,
   ButtonStyle,
+  ContainerBuilder,
   EmbedBuilder,
   MessageFlags,
   ModalBuilder,
   ModalSubmitInteraction,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
   TextInputBuilder,
   TextInputStyle,
+  TextDisplayBuilder,
 } from 'discord.js'
 import { db } from '@rp-chile/db'
 import { config } from '../config'
@@ -65,7 +69,10 @@ export async function manejarBoton(i: ButtonInteraction) {
 export async function manejarModal(i: ModalSubmitInteraction) {
   const [, accion, id] = i.customId.split(':')
   if (accion === 'modal') return recibirPostulacion(i)
-  if (accion === 'rechazo') return rechazar(i, id)
+  if (accion === 'rechazo') {
+    const [, , , canalId, mensajeId] = i.customId.split(':')
+    return rechazar(i, id, canalId, mensajeId)
+  }
 }
 
 const esStaff = (i: ButtonInteraction | ModalSubmitInteraction) =>
@@ -281,7 +288,7 @@ async function aprobar(i: ButtonInteraction, id: string) {
     }
   }
 
-  await actualizarMensaje(i, VERDE, `✅ Verificación aceptada por ${i.user} — RUT asignado: ${rut}`)
+  await actualizarMensaje(i, VERDE, `✅ **Verificación revisada: ACEPTADA**\nRevisada por ${i.user}. RUT asignado: ${rut}`)
   return i.editReply('Postulación aprobada.')
 }
 
@@ -291,8 +298,9 @@ async function pedirMotivoRechazo(i: ButtonInteraction, id: string) {
   if (!esStaff(i)) {
     return i.reply({ content: 'Solo el staff puede revisar postulaciones.', flags: EFIMERO })
   }
+  if (!i.message) return i.reply({ content: 'No se encontró el formulario original para actualizar.', flags: EFIMERO })
   const modal = new ModalBuilder()
-    .setCustomId(`verif:rechazo:${id}`)
+    .setCustomId(`verif:rechazo:${id}:${i.channelId}:${i.message.id}`)
     .setTitle('Motivo del rechazo')
     .addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
@@ -307,7 +315,7 @@ async function pedirMotivoRechazo(i: ButtonInteraction, id: string) {
   return i.showModal(modal)
 }
 
-async function rechazar(i: ModalSubmitInteraction, id: string) {
+async function rechazar(i: ModalSubmitInteraction, id: string, canalId: string, mensajeId: string) {
   if (!esStaff(i) || !i.inCachedGuild()) {
     return i.reply({ content: 'Solo el staff puede revisar postulaciones.', flags: EFIMERO })
   }
@@ -335,15 +343,50 @@ async function rechazar(i: ModalSubmitInteraction, id: string) {
     await enviarComponentsV2(miembro, `❌ Tu postulación fue **rechazada**.\n**Motivo:** ${motivo}\nPuedes volver a postular cuando quieras.`).catch(() => {})
   }
 
-  await actualizarMensaje(i, ROJO, `❌ Verificación rechazada por ${i.user}\n**Motivo:** ${motivo}`)
+  await actualizarMensaje(
+    i,
+    ROJO,
+    `❌ **Verificación revisada: RECHAZADA**\nRevisada por ${i.user}.\n**Motivo:** ${motivo}`,
+    { canalId, mensajeId },
+  )
   return i.editReply('Postulación rechazada.')
 }
 
 // ───────────── Utilidad: actualiza el mensaje de revisión del staff ─────────────
 
-async function actualizarMensaje(i: ButtonInteraction | ModalSubmitInteraction, color: number, resultado: string) {
-  const original = i.message?.embeds[0]
+async function actualizarMensaje(
+  i: ButtonInteraction | ModalSubmitInteraction,
+  color: number,
+  resultado: string,
+  referencia?: { canalId: string; mensajeId: string },
+) {
+  const mensaje = referencia
+    ? await obtenerMensajeRevision(i, referencia.canalId, referencia.mensajeId)
+    : i.isButton() ? i.message : null
+  if (!mensaje) return
+  const datosContainer = mensaje.components
+    .map((componente) => componente.toJSON())
+    .find((componente) => componente.type === 17)
+  if (datosContainer) {
+    const container = new ContainerBuilder({
+      ...datosContainer,
+      accent_color: color,
+      components: datosContainer.components.filter((componente) => componente.type !== 1),
+    })
+      .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large))
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## Verificación revisada\n${resultado}`))
+    await editarComponentsV2(mensaje, { components: [container], flags: MessageFlags.IsComponentsV2 }).catch(console.error)
+    return
+  }
+
+  const original = mensaje.embeds[0]
   if (!original) return
-  const embed = EmbedBuilder.from(original).setColor(color).addFields({ name: 'Estado de verificación', value: resultado })
-  if (i.message) await editarComponentsV2(i.message, { embeds: [embed], components: [] }).catch(console.error)
+  const embed = EmbedBuilder.from(original).setColor(color).addFields({ name: 'Verificación revisada', value: resultado })
+  await editarComponentsV2(mensaje, { embeds: [embed], components: [] }).catch(console.error)
+}
+
+async function obtenerMensajeRevision(i: ButtonInteraction | ModalSubmitInteraction, canalId: string, mensajeId: string) {
+  const canal = await i.client.channels.fetch(canalId).catch(() => null)
+  if (!canal?.isTextBased() || !('messages' in canal)) return null
+  return canal.messages.fetch(mensajeId).catch(() => null)
 }
