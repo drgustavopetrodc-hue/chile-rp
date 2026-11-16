@@ -16,8 +16,10 @@ export const config = {
     ciudadano: req('ROL_CIUDADANO_ID'),
     policia: process.env.ROL_POLICIA_ID,
     segundoPersonaje: process.env.ROL_SEGUNDO_PERSONAJE_ID,
-    soporte: process.env.ROL_SOPORTE_ID,
-    moderador: process.env.ROL_MODERADOR_ID,
+    fundacion: process.env.ROL_FUNDACION_ID || '1571735707364626545',
+    juntaAdministrativa: process.env.ROL_JUNTA_ADMINISTRATIVA_ID || '1571735714880557136',
+    soporte: process.env.ROL_SOPORTE_ID || '1571735822879948870',
+    moderador: process.env.ROL_MODERADOR_ID || '1571735735705403463',
     admin: process.env.ROL_ADMIN_ID,
   },
   canales: {

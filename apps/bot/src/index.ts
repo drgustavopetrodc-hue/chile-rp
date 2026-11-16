@@ -5,7 +5,7 @@ import { manejarBoton, manejarModal } from './handlers/verificacion'
 import { manejarMencionIA } from './commands/ia'
 import { asegurarUsuario } from './utils/usuarios'
 import { enviarBienvenida } from './commands/bienvenida'
-import { manejarBotonTicket, manejarModalTicket } from './commands/comunidad'
+import { manejarBotonTicket, manejarMensajeTicket, manejarModalTicket } from './commands/comunidad'
 import { cargarConfiguracionServidor, configuracion, usuarioPuedeUsarComando } from './commands/configuracion'
 import { cargarAutoReaccion, manejarAutoReaccion } from './commands/owner'
 import { adaptarInteraccionAComponentsV2 } from './utils/components-v2'
@@ -27,8 +27,10 @@ client.once(Events.ClientReady, async (c) => {
 
 client.on(Events.MessageCreate, (mensaje) => {
   void manejarAutoReaccion(mensaje)
-  if (mensaje.author.bot || !client.user || !mensaje.mentions.has(client.user)) return
+  if (mensaje.author.bot) return
   void (async () => {
+    if (await manejarMensajeTicket(mensaje)) return
+    if (!client.user || !mensaje.mentions.has(client.user)) return
     if (!await usuarioPuedeUsarComando('ia', mensaje.author.id)) {
       await mensaje.reply({
         content: 'Debes completar la verificación antes de usar este comando.',

@@ -171,64 +171,27 @@ export async function generar(p: Peticion): Promise<{ texto: string; proveedor: 
   throw new IAError('Todos los proveedores de IA fallaron o agotaron su cupo')
 }
 
-// ───────────── Límites de uso (se reinician cada día, hora de Chile) ─────────────
+// ───────────── Contador de uso (se reinicia cada día, hora de Chile) ─────────────
 
 const hoy = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' })
 
 let dia = hoy()
 let usoGlobal = 0
-const usoPorUsuario = new Map<string, number>()
-const ultimoUso = new Map<string, number>()
-
-const numeroEnv = (clave: string, defecto: number) => {
-  const n = Number(process.env[clave])
-  return Number.isFinite(n) && n >= 0 && process.env[clave] !== '' && process.env[clave] !== undefined ? n : defecto
-}
-
-export const limites = () => ({
-  global: numeroEnv('IA_LIMITE_GLOBAL_DIARIO', 400),
-  usuario: numeroEnv('IA_LIMITE_USUARIO_DIARIO', 15),
-  cooldownSegundos: numeroEnv('IA_COOLDOWN_SEGUNDOS', 15),
-})
 
 export type Reserva = { ok: true } | { ok: false; motivo: string }
 
-// `exento` (staff) se salta el límite y la espera por usuario, pero igual cuenta en el límite global.
-export function reservarUso(usuarioId: string, exento: boolean): Reserva {
+export function reservarUso(_usuarioId: string, _exento: boolean): Reserva {
   const d = hoy()
   if (d !== dia) {
     dia = d
     usoGlobal = 0
-    usoPorUsuario.clear()
-    ultimoUso.clear()
-  }
-  const lim = limites()
-  if (usoGlobal >= lim.global) {
-    return { ok: false, motivo: 'La IA alcanzó su límite de uso de hoy. Vuelve a intentarlo mañana.' }
-  }
-  if (!exento) {
-    const restante = (ultimoUso.get(usuarioId) ?? 0) + lim.cooldownSegundos * 1000 - Date.now()
-    if (restante > 0) {
-      return { ok: false, motivo: `Espera ${Math.ceil(restante / 1000)} segundos antes de volver a usar la IA.` }
-    }
-    const usados = usoPorUsuario.get(usuarioId) ?? 0
-    if (usados >= lim.usuario) {
-      return { ok: false, motivo: `Alcanzaste tu límite de ${lim.usuario} usos de IA por hoy.` }
-    }
-    usoPorUsuario.set(usuarioId, usados + 1)
-    ultimoUso.set(usuarioId, Date.now())
   }
   usoGlobal++
   return { ok: true }
 }
 
-// Si la IA falló, no se descuenta el uso al jugador.
-export function devolverUso(usuarioId: string, exento: boolean) {
+export function devolverUso(_usuarioId: string, _exento: boolean) {
   if (usoGlobal > 0) usoGlobal--
-  if (!exento) {
-    usoPorUsuario.set(usuarioId, Math.max(0, (usoPorUsuario.get(usuarioId) ?? 1) - 1))
-    ultimoUso.delete(usuarioId)
-  }
 }
 
 export const usoDeHoy = () => ({ dia, global: usoGlobal })

@@ -6,7 +6,7 @@ Copia estas dos carpetas dentro de tu proyecto (respeta las rutas):
 - `apps/bot/src/commands/ia.ts`
 
 Mantén `Normativa General Chile.pdf` en la raíz del proyecto. El bot busca los pasajes relevantes en todo el documento y los usa como fuente oficial.
-Todas las funciones de IA (incluidas las menciones al bot) usan el PDF y las instrucciones complementarias; si difieren, prevalece el PDF.
+Para asuntos del servidor, todas las funciones de IA (incluidas las menciones al bot) usan el PDF y las instrucciones complementarias; si difieren, prevalece el PDF. También puede contestar preguntas generales ajenas al servidor. Para datos específicos como el nombre del fundador, agréguelo en `/ia reglas`; si no está en las fuentes, la IA no lo inventará.
 
 ## 2. Registrar el comando
 En `apps/bot/src/commands/index.ts` agrega estas dos cosas:
@@ -40,6 +40,8 @@ En Discord (como administrador):
 
 También puedes mencionar al bot en un canal del servidor para que responda. Está sujeto a los mismos límites diarios y espera entre usos.
 
+Al abrir un ticket, la IA responde primero y pide detalles; después deriva los casos graves a Fundación o Junta Administrativa, los reportes de roleplay y apelaciones a Moderación, y las dudas normales a Soporte. Los IDs configurados por defecto son los que se indicaron para esos cuatro roles; se pueden cambiar con `ROL_FUNDACION_ID`, `ROL_JUNTA_ADMINISTRATIVA_ID`, `ROL_MODERADOR_ID` y `ROL_SOPORTE_ID`.
+
 ## Comandos
 | Comando | Quién | Qué hace |
 |---|---|---|
@@ -51,7 +53,7 @@ También puedes mencionar al bot en un canal del servidor para que responda. Est
 | `/ia activar` | administradores | Enciende o apaga la IA |
 
 ## Límites y cuidado del cupo gratuito
-- Por defecto: 15 usos por jugador al día, 15 segundos de espera entre usos y 400 consultas diarias en total. El staff no tiene límite por jugador. Se ajusta con `IA_LIMITE_USUARIO_DIARIO`, `IA_LIMITE_GLOBAL_DIARIO` e `IA_COOLDOWN_SEGUNDOS`.
+- El bot no impone límites diarios ni espera entre usos. Las cuotas, límites de solicitudes/tokens y posibles costos de Gemini, Groq u OpenRouter siguen aplicando. Las variables antiguas `IA_LIMITE_USUARIO_DIARIO`, `IA_LIMITE_GLOBAL_DIARIO` e `IA_COOLDOWN_SEGUNDOS` ya no tienen efecto.
 - Los planes gratuitos pueden usar lo que envías para mejorar sus modelos. No cargues datos personales reales ni información privada de jugadores.
 - Los cupos y los nombres de modelos gratuitos cambian. Si `/ia estado probar:True` falla, revisa en Google AI Studio qué modelo está disponible y ponlo en `GEMINI_MODEL`.
 - La IA nunca sanciona ni decide nada: solo responde, redacta borradores y resume.
