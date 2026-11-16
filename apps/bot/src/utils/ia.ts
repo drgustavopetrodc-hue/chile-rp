@@ -7,18 +7,48 @@ import { PDFParse } from 'pdf-parse'
 
 export class IAError extends Error {}
 
-let normativaCache: Promise<string> | undefined
+interface PaginaNormativa {
+  numero: number
+  texto: string
+  frecuencias: Map<string, number>
+}
 
-export function cargarNormativa(): Promise<string> {
+const palabrasComunes = new Set([
+  'a', 'al', 'algo', 'algunos', 'ante', 'como', 'con', 'cual', 'cuando', 'de', 'del', 'desde', 'donde',
+  'durante', 'e', 'el', 'ella', 'ellas', 'ellos', 'en', 'entre', 'era', 'es', 'esa', 'ese', 'eso', 'esta',
+  'este', 'esto', 'fue', 'ha', 'hace', 'hacia', 'hay', 'la', 'las', 'le', 'les', 'lo', 'los', 'me', 'mi',
+  'mis', 'más', 'muy', 'no', 'o', 'para', 'pero', 'por', 'que', 'se', 'sin', 'sobre', 'su', 'sus', 'también',
+  'te', 'tiene', 'un', 'una', 'uno', 'unos', 'unas', 'y', 'ya', 'normativa', 'regla', 'reglas',
+])
+
+function palabras(texto: string) {
+  return texto
+    .toLocaleLowerCase('es-CL')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .match(/[\p{L}\p{N}]{2,}/gu) ?? []
+}
+
+let normativaCache: Promise<PaginaNormativa[]> | undefined
+
+async function cargarPaginasNormativa(): Promise<PaginaNormativa[]> {
   if (!normativaCache) {
     normativaCache = (async () => {
       const parser = new PDFParse({
         data: await readFile(new URL('../../../../Normativa General Chile.pdf', import.meta.url)),
       })
       try {
-        const texto = (await parser.getText()).text.trim()
-        if (!texto) throw new IAError('Normativa General Chile.pdf no contiene texto legible')
-        return texto
+        const paginas = (await parser.getText()).pages
+          .map(({ num, text }) => ({ numero: num, texto: text.trim() }))
+          .filter(({ texto }) => texto.length > 0)
+        if (!paginas.length) throw new IAError('Normativa General Chile.pdf no contiene texto legible')
+        return paginas.map((pagina) => ({
+          ...pagina,
+          frecuencias: palabras(pagina.texto).reduce((frecuencias, palabra) => {
+            frecuencias.set(palabra, (frecuencias.get(palabra) ?? 0) + 1)
+            return frecuencias
+          }, new Map<string, number>()),
+        }))
       } finally {
         await parser.destroy()
       }
@@ -28,6 +58,36 @@ export function cargarNormativa(): Promise<string> {
     })
   }
   return normativaCache
+}
+
+export async function extraerNormativaRelevante(consulta: string, maxCaracteres = 4500): Promise<string> {
+  const paginas = await cargarPaginasNormativa()
+  const terminos = [...new Set(palabras(consulta).filter((palabra) => !palabrasComunes.has(palabra)))]
+  if (!terminos.length) return ''
+
+  const puntajes = paginas.map((pagina) => {
+    let puntaje = 0
+    for (const termino of terminos) {
+      const frecuencia = pagina.frecuencias.get(termino) ?? 0
+      if (!frecuencia) continue
+      const documentos = paginas.filter((otra) => otra.frecuencias.has(termino)).length
+      const idf = Math.log(1 + (paginas.length - documentos + 0.5) / (documentos + 0.5))
+      puntaje += idf * (1 + Math.log(frecuencia))
+    }
+    return { pagina, puntaje }
+  }).filter(({ puntaje }) => puntaje > 0).sort((a, b) => b.puntaje - a.puntaje)
+
+  let restante = maxCaracteres
+  const extractos: string[] = []
+  for (const { pagina } of puntajes) {
+    if (restante <= 0) break
+    const encabezado = `${extractos.length ? '\n\n' : ''}Página ${pagina.numero}:\n`
+    const texto = pagina.texto.slice(0, Math.max(0, restante - encabezado.length))
+    if (!texto) continue
+    extractos.push(`${encabezado}${texto}`)
+    restante -= encabezado.length + texto.length
+  }
+  return extractos.reverse().join('')
 }
 
 interface Proveedor {
@@ -61,7 +121,7 @@ export function proveedoresConfigurados(): Proveedor[] {
       nombre: 'OpenRouter',
       base: e.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
       clave: e.OPENROUTER_API_KEY,
-      modelo: e.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free',
+      modelo: e.OPENROUTER_MODEL || 'inclusionai/ling-3.2-flash:free',
     })
   }
   return lista

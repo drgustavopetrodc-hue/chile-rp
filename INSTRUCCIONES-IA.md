@@ -5,7 +5,7 @@ Copia estas dos carpetas dentro de tu proyecto (respeta las rutas):
 - `apps/bot/src/utils/ia.ts`
 - `apps/bot/src/commands/ia.ts`
 
-Mantén `Normativa General Chile.pdf` en la raíz del proyecto. El bot extrae y usa su contenido automáticamente como fuente oficial.
+Mantén `Normativa General Chile.pdf` en la raíz del proyecto. El bot busca los pasajes relevantes en todo el documento y los usa como fuente oficial.
 Todas las funciones de IA (incluidas las menciones al bot) usan el PDF y las instrucciones complementarias; si difieren, prevalece el PDF.
 
 ## 2. Registrar el comando
@@ -23,6 +23,7 @@ En `apps/bot/src/commands/index.ts` agrega estas dos cosas:
 ## 3. Conseguir las claves (gratis)
 - **Gemini (principal):** entra a https://aistudio.google.com/apikey, inicia sesión con tu cuenta de Google y pulsa "Create API key". Copia la clave en `GEMINI_API_KEY`.
 - **Groq (respaldo):** https://console.groq.com/keys → "Create API Key" → `GROQ_API_KEY`. El modelo predeterminado es `openai/gpt-oss-120b`.
+- **OpenRouter (segundo respaldo):** configura `OPENROUTER_API_KEY`; el modelo gratuito predeterminado es `inclusionai/ling-3.2-flash:free`.
 - Con una sola clave ya funciona. Con las dos, si Gemini agota su cupo el bot pasa a Groq automáticamente.
 
 Las claves van en `apps/bot/.env` (y en *Variables* de Railway). Nunca las subas a GitHub.
