@@ -281,7 +281,7 @@ async function aprobar(i: ButtonInteraction, id: string) {
     }
   }
 
-  await actualizarMensaje(i, VERDE, `✅ Aprobada por ${i.user} — RUT asignado: ${rut}`)
+  await actualizarMensaje(i, VERDE, `✅ Verificación aceptada por ${i.user} — RUT asignado: ${rut}`)
   return i.editReply('Postulación aprobada.')
 }
 
@@ -335,7 +335,7 @@ async function rechazar(i: ModalSubmitInteraction, id: string) {
     await enviarComponentsV2(miembro, `❌ Tu postulación fue **rechazada**.\n**Motivo:** ${motivo}\nPuedes volver a postular cuando quieras.`).catch(() => {})
   }
 
-  await actualizarMensaje(i, ROJO, `❌ Rechazada por ${i.user}\n**Motivo:** ${motivo}`)
+  await actualizarMensaje(i, ROJO, `❌ Verificación rechazada por ${i.user}\n**Motivo:** ${motivo}`)
   return i.editReply('Postulación rechazada.')
 }
 
@@ -344,6 +344,6 @@ async function rechazar(i: ModalSubmitInteraction, id: string) {
 async function actualizarMensaje(i: ButtonInteraction | ModalSubmitInteraction, color: number, resultado: string) {
   const original = i.message?.embeds[0]
   if (!original) return
-  const embed = EmbedBuilder.from(original).setColor(color).addFields({ name: 'Resultado', value: resultado })
+  const embed = EmbedBuilder.from(original).setColor(color).addFields({ name: 'Estado de verificación', value: resultado })
   if (i.message) await editarComponentsV2(i.message, { embeds: [embed], components: [] }).catch(console.error)
 }
