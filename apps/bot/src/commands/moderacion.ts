@@ -12,9 +12,9 @@ import {
 import { db } from '@rp-chile/db'
 import { asegurarUsuario } from '../utils/usuarios'
 import { comoComponentsV2 } from '../utils/components-v2'
+import { config } from '../config'
 
 const efimero = MessageFlags.Ephemeral
-const canalCasosId = '1571338831003656303'
 const guildCommand = (name: string, description: string) =>
   new SlashCommandBuilder().setName(name).setDescription(description).setContexts(InteractionContextType.Guild)
 
@@ -146,7 +146,7 @@ async function publicarCasoModeracion(
 ) {
   if (!i.inCachedGuild()) return null
   try {
-    const canal = await i.guild.channels.fetch(canalCasosId)
+    const canal = await i.guild.channels.fetch(config.canales.casosModeracion)
     if (!canal?.isTextBased() || !('threads' in canal) || !canal.isSendable()) return null
     const fecha = new Intl.DateTimeFormat('es-CL', { dateStyle: 'long', timeStyle: 'short', timeZone: 'America/Santiago' }).format(new Date())
     const container = new ContainerBuilder()

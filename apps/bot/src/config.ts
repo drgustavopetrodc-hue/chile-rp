@@ -23,5 +23,8 @@ export const config = {
   canales: {
     revision: req('CANAL_REVISION_ID'),
     categoriaTickets: process.env.CATEGORIA_TICKETS_ID,
+    casosModeracion: req('CANAL_CASOS_MODERACION_ID'),
+    logModeracion: req('CANAL_LOG_MODERACION_ID'),
+    logAdministracion: req('CANAL_LOG_ADMIN_ID'),
   },
 }

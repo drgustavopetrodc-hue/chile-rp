@@ -8,6 +8,8 @@ import { manejarBotonTicket, manejarModalTicket } from './commands/comunidad'
 import { cargarConfiguracionServidor, configuracion, usuarioPuedeUsarComando } from './commands/configuracion'
 import { cargarAutoReaccion, manejarAutoReaccion } from './commands/owner'
 import { adaptarInteraccionAComponentsV2 } from './utils/components-v2'
+import { esComandoPrivilegiado, registrarComandoPrivilegiado } from './utils/auditoria-comandos'
+import type { ChatInputCommandInteraction } from 'discord.js'
 
 const client = new Client({
   // GuildMembers es un intent privilegiado: actívalo en el Developer Portal > Bot.
@@ -40,13 +42,19 @@ client.on(Events.GuildMemberAdd, async (miembro) => {
 
 client.on(Events.InteractionCreate, async (i) => {
   adaptarInteraccionAComponentsV2(i)
+  let comandoAuditado: ChatInputCommandInteraction | undefined
   try {
     if (i.isChatInputCommand()) {
+      comandoAuditado = esComandoPrivilegiado(i) ? i : undefined
       if (!await usuarioPuedeUsarComando(i.commandName, i.user.id)) {
         await i.reply({ content: 'Debes completar la verificación antes de usar este comando.', flags: MessageFlags.Ephemeral })
+        if (comandoAuditado) await registrarComandoPrivilegiado(comandoAuditado, 'procesado')
+        comandoAuditado = undefined
         return
       }
       await mapaComandos.get(i.commandName)?.execute(i)
+      if (comandoAuditado) await registrarComandoPrivilegiado(comandoAuditado, 'procesado')
+      comandoAuditado = undefined
     } else if (i.isButton() && i.customId.startsWith('ticketpanel:')) {
       await manejarBotonTicket(i)
     } else if (i.isModalSubmit() && i.customId.startsWith('ticketpanel:')) {
@@ -58,6 +66,7 @@ client.on(Events.InteractionCreate, async (i) => {
     }
   } catch (err) {
     console.error(err)
+    if (comandoAuditado) await registrarComandoPrivilegiado(comandoAuditado, 'error', err).catch(console.error)
     if (i.isRepliable()) {
       const aviso = { content: 'Ocurrió un error. Avisa al staff.', flags: MessageFlags.Ephemeral } as const
       if (i.replied || i.deferred) await i.followUp(aviso).catch(() => {})
