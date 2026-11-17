@@ -363,33 +363,32 @@ async function manejarConfirmacionCierreTicket(i: ButtonInteraction) {
     return i.reply({ content: 'Solo quien solicitó eliminar el ticket puede confirmar o cancelar esta acción.', flags: efimero })
   }
 
-  const ticket = await db.ticket.findUnique({
-    where: { id: pendiente.ticketId },
-    include: { usuario: { select: { discordId: true } } },
-  })
-  const canal = await i.guild.channels.fetch(pendiente.canalId)
-  if (!ticket || !canal || canal.type !== ChannelType.GuildText || ticket.canalDiscordId !== canal.id) {
-    confirmacionesCierreTicket.delete(id)
-    return i.reply({ content: 'El ticket o su canal ya no existen.', flags: efimero })
-  }
-  const miembro = i.member
-  if (!puedeEliminarTicket(canal, miembro, ticket.usuario.discordId)) {
-    confirmacionesCierreTicket.delete(id)
-    return i.reply({ content: 'Ya no tienes autorización para eliminar este ticket.', flags: efimero })
-  }
+  confirmacionesCierreTicket.delete(id)
+  await i.deferUpdate()
   if (accion === 'cancelar') {
-    confirmacionesCierreTicket.delete(id)
-    return i.update(comoComponentsV2({
+    return i.editReply(comoComponentsV2({
       content: `<@${i.user.id}>`,
       embeds: [crearEmbed('Eliminación cancelada', 'El ticket se conservará.', 0x808080)],
       allowedMentions: { users: [i.user.id], parse: [] },
     }))
   }
 
-  confirmacionesCierreTicket.delete(id)
+  const ticket = await db.ticket.findUnique({
+    where: { id: pendiente.ticketId },
+    include: { usuario: { select: { discordId: true } } },
+  })
+  const canal = await i.guild.channels.fetch(pendiente.canalId)
+  if (!ticket || !canal || canal.type !== ChannelType.GuildText || ticket.canalDiscordId !== canal.id) {
+    return i.followUp({ content: 'El ticket o su canal ya no existen.', flags: efimero })
+  }
+  const miembro = i.member
+  if (!puedeEliminarTicket(canal, miembro, ticket.usuario.discordId)) {
+    return i.followUp({ content: 'Ya no tienes autorización para eliminar este ticket.', flags: efimero })
+  }
+
   cierresTicketEnCurso.add(ticket.id)
   try {
-    await i.update(comoComponentsV2({
+    await i.editReply(comoComponentsV2({
       content: `<@${i.user.id}>`,
       embeds: [crearEmbed(
         'Eliminación en curso',
