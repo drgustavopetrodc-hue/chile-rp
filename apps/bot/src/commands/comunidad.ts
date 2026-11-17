@@ -21,7 +21,7 @@ import { CategoriaTicket, db } from '@rp-chile/db'
 import { config } from '../config'
 import { asegurarUsuario } from '../utils/usuarios'
 import { crearEmbed } from '../utils/embeds'
-import { editarComponentsV2, enviarComponentsV2 } from '../utils/components-v2'
+import { enviarComponentsV2 } from '../utils/components-v2'
 import { crearSistemaIA, leerAjusteIA } from './ia'
 import {
   devolverUso,
@@ -143,21 +143,38 @@ export async function manejarModalTicket(i: ModalSubmitInteraction) {
 
 function mensajeErrorCreacionTicket(error: unknown) {
   const codigo = typeof error === 'object' && error !== null && 'code' in error ? Number(error.code) : undefined
+  if (error instanceof ErrorConfiguracionTicket) return error.message
   if (codigo === 50013) {
     return 'Discord no permitió crear el canal. Revisa que el bot tenga **Gestionar canales** y **Gestionar roles**, y que su rol esté sobre los permisos que necesita aplicar.'
   }
-  if (codigo === 50001 || codigo === 50035) {
+  if (codigo === 50001) {
     return 'No se pudo acceder a la categoría configurada para tickets. Revisa `CATEGORIA_TICKETS_ID` y los permisos del bot en esa categoría.'
   }
+  if (codigo === 50035) return 'Discord rechazó la configuración del canal. Revisa que `CATEGORIA_TICKETS_ID` sea una categoría válida y que los permisos estén bien configurados.'
   if (codigo === 30013) return 'El servidor alcanzó el máximo de canales de Discord y no puede crear otro ticket.'
   return 'No pude crear el canal del ticket. Revisa los permisos **Gestionar canales** y **Gestionar roles** del bot, la categoría de tickets y los registros de Railway.'
 }
+
+class ErrorConfiguracionTicket extends Error {}
 
 async function crearTicket(guild: Guild, usuarioDiscord: User, asunto: string, categoria: CategoriaTicket) {
   const usuario = await asegurarUsuario(usuarioDiscord)
   const existente = await db.ticket.findFirst({ where: { usuarioId: usuario.id, estado: { in: ['ABIERTO', 'EN_ATENCION'] } } })
   if (existente) return { existente }
   if (!config.roles.soporte) throw new Error('ROL_SOPORTE_ID no configurado')
+  const botMiembro = await guild.members.fetchMe()
+  if (!botMiembro.permissions.has(PermissionFlagsBits.ManageChannels)) {
+    throw new ErrorConfiguracionTicket('Al bot le falta el permiso **Gestionar canales** para crear tickets.')
+  }
+  if (!botMiembro.permissions.has(PermissionFlagsBits.ManageRoles)) {
+    throw new ErrorConfiguracionTicket('Al bot le falta **Gestionar roles**, necesario para configurar el acceso privado al ticket.')
+  }
+  if (config.canales.categoriaTickets) {
+    const categoriaTickets = await guild.channels.fetch(config.canales.categoriaTickets)
+    if (!categoriaTickets || categoriaTickets.type !== ChannelType.GuildCategory) {
+      throw new ErrorConfiguracionTicket('`CATEGORIA_TICKETS_ID` no corresponde a una categoría válida de este servidor.')
+    }
+  }
   const nombre = `ticket-${usuarioDiscord.username.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 18) || usuarioDiscord.id.slice(-6)}`
   const canal = await guild.channels.create({
     name: nombre,
@@ -235,11 +252,12 @@ async function responderAlAbrirTicket(
       usuario: `Asunto del ticket: ${ticket.asunto}\nCategoría: ${ticket.categoria}`,
       maxTokens: 350,
     })
-    await editarComponentsV2(respuesta, {
+    await enviarComponentsV2(canal, {
       content: `<@${usuario.id}>`,
       embeds: [crearEmbed('Respuesta de IA', limpiarSalida(resultado.texto, 1700))],
       allowedMentions: { users: [usuario.id] },
     })
+    await respuesta.delete().catch((error) => console.warn(`[Ticket #${ticket.numero}] No se pudo retirar el aviso temporal:`, error))
   } catch (error) {
     devolverUso(usuario.id, true)
     console.error(`[Ticket #${ticket.numero}] Falló la respuesta inicial de IA:`, error instanceof IAError ? error.message : error)

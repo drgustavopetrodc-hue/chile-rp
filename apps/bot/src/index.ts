@@ -3,6 +3,7 @@ import { config } from './config'
 import { comandos } from './commands'
 import { manejarBoton, manejarModal } from './handlers/verificacion'
 import { manejarMencionIA } from './commands/ia'
+import { manejarConfirmacionAdministrativa } from './commands/ia-administracion'
 import { asegurarUsuario } from './utils/usuarios'
 import { enviarBienvenida } from './commands/bienvenida'
 import { manejarBotonTicket, manejarMensajeTicket, manejarModalTicket } from './commands/comunidad'
@@ -71,6 +72,8 @@ client.on(Events.InteractionCreate, async (i) => {
       comandoAuditado = undefined
     } else if (i.isButton() && i.customId.startsWith('ticketpanel:')) {
       await manejarBotonTicket(i)
+    } else if (i.isButton() && i.customId.startsWith('ia-admin:')) {
+      await manejarConfirmacionAdministrativa(i)
     } else if (i.isModalSubmit() && i.customId.startsWith('ticketpanel:')) {
       await manejarModalTicket(i)
     } else if (i.isButton() && i.customId.startsWith('verif:')) {

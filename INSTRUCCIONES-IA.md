@@ -40,13 +40,14 @@ En Discord (como administrador):
 
 También puedes mencionar al bot en un canal del servidor para que responda. Las respuestas se publican en contenedores de Components V2.
 
-Al abrir un ticket, la IA responde primero y pide detalles; después deriva los casos graves a Fundación o Junta Administrativa, los reportes de roleplay y apelaciones a Moderación, y las dudas normales a Soporte. Los IDs configurados por defecto son los que se indicaron para esos cuatro roles; se pueden cambiar con `ROL_FUNDACION_ID`, `ROL_JUNTA_ADMINISTRATIVA_ID`, `ROL_MODERADOR_ID` y `ROL_SOPORTE_ID`.
+Al abrir un ticket, la IA responde primero y pide detalles. El creador puede escribir su solicitud o los datos que faltan directamente en el canal: no necesita mencionar al bot. La IA procesa esos mensajes automáticamente y deriva los casos graves a Fundación o Junta Administrativa, los reportes de roleplay y apelaciones a Moderación, y las dudas normales a Soporte. Los IDs configurados por defecto son los que se indicaron para esos cuatro roles; se pueden cambiar con `ROL_FUNDACION_ID`, `ROL_JUNTA_ADMINISTRATIVA_ID`, `ROL_MODERADOR_ID` y `ROL_SOPORTE_ID`.
 
 ### Acciones con mención al bot
-- Solo miembros de Fundación o Junta Administrativa pueden solicitar que el bot vete a alguien o le asigne un rol.
-- Menciona exactamente a una persona para vetarla: `@Bot banea @persona`.
-- Para asignar un rol, menciona exactamente un rol y una persona: `@Bot asigna el rol @rol a @persona`.
-- La persona y el rol deben ser asignables por el bot según sus permisos y jerarquía. Por seguridad, no asigna roles con permisos administrativos o de moderación. No se ejecutan preguntas sobre cómo hacer estas acciones.
+- Solo miembros de Fundación o Junta Administrativa pueden solicitar las acciones administrativas descritas aquí.
+- El bot muestra una confirmación para cada cambio; solo quien lo solicitó puede confirmarlo, dentro de 2 minutos.
+- Ejemplos: `@Bot crea un rol "Nombre del rol"`; `@Bot renombra el rol @rol a "Nuevo nombre"`; `@Bot asigna el rol @rol a @persona`; `@Bot quita el rol @rol a @persona`; `@Bot crea canal texto general`; `@Bot renombra el canal #general a "chat"`; `@Bot elimina el canal #general`; `@Bot permite enviar mensajes al rol @rol`; `@Bot permite ver canal #general al rol @rol`; `@Bot banea @persona`; `@Bot desbanea ID`; `@Bot expulsa @persona`; `@Bot timeout @persona por 10 minutos`; `@Bot elimina los últimos 10 mensajes`; `@Bot fija mensaje URL`.
+- Los roles creados no reciben permisos. La IA no asigna ni configura permisos administrativos o de moderación; en roles y canales solo modifica permisos de ver, enviar mensajes, historial, conectar y hablar. El bot debe tener los permisos y la jerarquía de roles necesarios.
+- Las acciones no dependen de que los proveedores de IA estén disponibles. No se ejecutan preguntas sobre cómo realizar estas acciones.
 - El bot registra la solicitud en el motivo del registro de auditoría de Discord. Estas acciones no requieren que los proveedores de IA estén disponibles.
 
 ## Comandos
