@@ -1,5 +1,6 @@
 import {
   ContainerBuilder,
+  FileBuilder,
   MediaGalleryBuilder,
   MediaGalleryItemBuilder,
   MessageFlags,
@@ -28,6 +29,7 @@ export function comoComponentsV2(payload: string | Payload, incluirFlags = true)
   if (typeof original.content === 'string' && original.content.length) agregarTexto(original.content)
 
   const imagenes = new Set<string>()
+  const archivos = new Set<string>()
   for (const bruto of (original.embeds ?? []) as Payload[]) {
     const embed = typeof bruto?.toJSON === 'function' ? bruto.toJSON() as Payload : bruto
     const secciones: string[] = []
@@ -46,7 +48,9 @@ export function comoComponentsV2(payload: string | Payload, incluirFlags = true)
 
   for (const archivo of original.files ?? []) {
     const nombre = typeof archivo?.name === 'string' ? archivo.name : undefined
-    if (nombre && /\.(png|jpe?g|webp|gif)$/i.test(nombre)) imagenes.add(`attachment://${nombre}`)
+    if (!nombre) continue
+    if (/\.(png|jpe?g|webp|gif)$/i.test(nombre)) imagenes.add(`attachment://${nombre}`)
+    else archivos.add(nombre)
   }
 
   if (imagenes.size) {
@@ -54,6 +58,11 @@ export function comoComponentsV2(payload: string | Payload, incluirFlags = true)
       ...[...imagenes].slice(0, 10).map((url) => new MediaGalleryItemBuilder().setURL(url)),
     )
     container.addMediaGalleryComponents(galeria)
+    tieneContenido = true
+  }
+
+  for (const nombre of archivos) {
+    container.addFileComponents(new FileBuilder().setURL(`attachment://${nombre}`))
     tieneContenido = true
   }
 
