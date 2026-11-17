@@ -162,9 +162,49 @@ function unCanal(mensaje: Message) {
 function nombreDesde(texto: string, marcador: RegExp) {
   const coincidencia = marcador.exec(texto)
   const nombre = coincidencia ? texto.slice(coincidencia.index + coincidencia[0].length) : ''
-  const limpio = nombre.replace(/^[\s"'“]+|[\s"'”.,!?]+$/g, '').trim()
+  const limpio = nombre
+    .replace(/^\s*(?:que\s+se\s+llame|se\s+llame|llamad[oa]|de\s+nombre)\s+/i, '')
+    .replace(/^[\s"'“]+|[\s"'”.,!?]+$/g, '')
+    .trim()
   if (!limpio || limpio.length > 100) throw new Error('Indica un nombre de entre 1 y 100 caracteres.')
   return limpio
+}
+
+function nombreRolNuevo(texto: string) {
+  const marcador = /(?:crea|crear|crees)\s+(?:(?:un|el)\s+)?rol\s+/i
+  const coincidencia = marcador.exec(texto)
+  if (!coincidencia) throw new Error('Indica el nombre del rol nuevo.')
+  const resto = texto.slice(coincidencia.index + coincidencia[0].length)
+  const entreComillas = resto.match(/["“]([^"”]{1,100})["”]/)?.[1]
+  if (entreComillas) return entreComillas.trim()
+
+  const sinIntroduccion = resto.replace(/^\s*(?:que\s+se\s+llame|se\s+llame|llamad[oa]|de\s+nombre|que\s+es)\s+/i, '')
+  const limite = /\b(?:por\s+encima\s+de|encima\s+de|sobre|y\s+que\s+tenga|y\s+que\s+sea|con\s+(?:permiso(?:s)?(?:\s+de)?\s+)?(?:administrador|administrator|admin)|que\s+tenga\s+(?:permiso\s+)?(?:administrador|administrator|admin))\b/i
+  const nombre = sinIntroduccion.split(limite, 1)[0]!.replace(/^[\s"'“]+|[\s"'”.,!?]+$/g, '').trim()
+  if (!nombre) throw new Error('Indica el nombre exacto del rol, por ejemplo `"Vice Presidente general"`.')
+  if (nombre.length > 100) throw new Error('El nombre del rol no puede superar los 100 caracteres.')
+  return nombre
+}
+
+async function resolverRolReferencia(mensaje: Message, texto: string) {
+  const relacion = texto.match(/(?:por\s+encima\s+de|encima\s+de|sobre)\s+(.+?)(?=\s+(?:y\s+que\s+tenga|y\s+que\s+sea|con\s+(?:permiso(?:s)?(?:\s+de)?\s+)?(?:administrador|administrator|admin))|$)/i)
+  if (!relacion) return undefined
+
+  const menciones = [...mensaje.mentions.roles.values()]
+  if (menciones.length > 1) throw new Error('Menciona solo el rol de referencia.')
+  const mencionado = menciones[0]
+  if (mencionado) return mencionado
+
+  const nombre = relacion[1]!.replace(/^[\s"'“]+|[\s"'”.,!?]+$/g, '').trim()
+  if (!nombre) throw new Error('Menciona el rol de referencia o escribe su nombre exacto.')
+  const roles = await mensaje.guild!.roles.fetch()
+  const coincidencias = roles.filter((rol) => normalizar(rol.name) === normalizar(nombre))
+  if (coincidencias.size !== 1) {
+    throw new Error(coincidencias.size
+      ? 'Hay varios roles con ese nombre. Menciona exactamente el rol de referencia.'
+      : `No encontré el rol "${nombre}". Menciónalo o escribe su nombre exacto.`)
+  }
+  return coincidencias.first()!
 }
 
 function nombreCanalDesde(texto: string, marcador: RegExp) {
@@ -196,7 +236,7 @@ function rolNoEliminable(rol: Role) {
   return rolNoAdministrable(rol) || rolesNoEliminables.includes(rol.id)
 }
 
-function crearOperacion(mensaje: Message, texto: string, intencion: Intencion, botId: string): OperacionAdministrativa {
+async function crearOperacion(mensaje: Message, texto: string, intencion: Intencion, botId: string): Promise<OperacionAdministrativa> {
   const guild = mensaje.guild!
   switch (intencion) {
     case 'ban': {
@@ -263,13 +303,43 @@ function crearOperacion(mensaje: Message, texto: string, intencion: Intencion, b
       }
     }
     case 'crearRol': {
-      const nombre = nombreDesde(texto, /(?:crea|crear|crees)\s+(?:un\s+)?rol\s+/i)
+      const nombre = nombreRolNuevo(texto)
+      const normalizado = normalizar(texto.replace(/["“][^"”]*["”]/g, ''))
+      const conAdministrador = /\b(?:que tenga|con|asignar(?:le)?|agregar(?:le)?|darle)\b.{0,40}\b(?:administrador|administrator|admin)\b/.test(normalizado)
+      const referencia = await resolverRolReferencia(mensaje, texto)
+      const botMiembro = await guild.members.fetchMe()
+      if (!botMiembro.permissions.has(PermissionFlagsBits.ManageRoles)) {
+        throw new Error('El bot necesita el permiso **Gestionar roles** para crear y posicionar roles.')
+      }
+      if (referencia && referencia.position + 1 >= botMiembro.roles.highest.position) {
+        throw new Error('El rol del bot debe estar por encima del rol de referencia para colocar el nuevo rol encima.')
+      }
       return {
         titulo: 'Crear un rol',
-        detalle: `Se creará el rol **${textoSeguro(nombre)}** sin permisos administrativos.`,
+        detalle: `Se creará el rol **${textoSeguro(nombre)}**${referencia ? ` por encima de **${textoSeguro(referencia.name)}**` : ''}${conAdministrador
+          ? ' con **Administrador** (control total del servidor).'
+          : ' sin permisos administrativos.'}`,
         ejecutar: async () => {
+          const referenciaActual = referencia ? await guild.roles.fetch(referencia.id) : null
+          if (referencia && !referenciaActual) throw new Error('El rol de referencia ya no existe.')
+          const botActual = await guild.members.fetchMe()
+          const posicion = referenciaActual ? referenciaActual.position + 1 : undefined
+          if (posicion !== undefined && posicion >= botActual.roles.highest.position) {
+            throw new Error('El rol del bot ya no está suficientemente alto para colocar el nuevo rol ahí.')
+          }
           const rol = await guild.roles.create({ name: nombre, permissions: [], reason: razon(mensaje) })
-          return `Rol **${textoSeguro(rol.name)}** creado. No se le asignaron permisos.`
+          try {
+            if (posicion !== undefined) await rol.setPosition(posicion, { reason: razon(mensaje) })
+            if (conAdministrador) await rol.setPermissions(PermissionFlagsBits.Administrator, razon(mensaje))
+          } catch (error) {
+            await rol.delete('Limpieza tras no poder completar la configuración del rol').catch((cleanupError) => {
+              console.error(`[IA administración] No se pudo limpiar el rol incompleto ${rol.id}:`, cleanupError)
+            })
+            throw error
+          }
+          return `Rol **${textoSeguro(rol.name)}** creado${referenciaActual ? ` por encima de **${textoSeguro(referenciaActual.name)}**` : ''}${conAdministrador
+            ? ' con permiso de **Administrador**.'
+            : ' sin permisos administrativos.'}`
         },
       }
     }
@@ -295,16 +365,42 @@ function crearOperacion(mensaje: Message, texto: string, intencion: Intencion, b
       }
     }
     case 'eliminarRol': {
-      const rol = unRol(mensaje)
-      if (rolNoEliminable(rol)) throw new Error('Ese rol está protegido y no se puede eliminar mediante una mención.')
+      const roles = [...mensaje.mentions.roles.values()]
+      if (roles.length === 0) throw new Error('Menciona uno o más roles que quieras eliminar.')
+      if (roles.some((rol) => rol.id === guild.id || rol.managed)) {
+        throw new Error('Los roles @everyone y administrados por integraciones no se pueden eliminar.')
+      }
+      if (roles.some(rolNoEliminable)) throw new Error('Uno o más roles están protegidos y no se pueden eliminar mediante una mención.')
       return {
         titulo: 'Eliminar un rol',
-        detalle: `Se eliminará el rol **${textoSeguro(rol.name)}** del servidor.`,
+        detalle: `Se eliminarán ${roles.length === 1 ? 'el rol' : 'los roles'} ${roles.map((rol) => `**${textoSeguro(rol.name)}**`).join(', ')} del servidor.`,
         ejecutar: async () => {
-          const actual = await guild.roles.fetch(rol.id)
-          if (!actual?.editable) throw new Error('El bot no puede eliminar ese rol por permisos o jerarquía.')
-          await actual.delete(razon(mensaje))
-          return `Rol **${textoSeguro(rol.name)}** eliminado.`
+          const rolesObtenidos = await Promise.all(roles.map((rol) => guild.roles.fetch(rol.id)))
+          if (rolesObtenidos.some((rol) => !rol)) throw new Error('Uno o más roles ya no existen.')
+          const rolesActuales = rolesObtenidos.filter((rol): rol is Role => rol !== null)
+          if (rolesActuales.some(rolNoEliminable)) throw new Error('Uno o más roles ahora están protegidos y no se pueden eliminar.')
+          if (rolesActuales.some((rol) => !rol.editable)) {
+            throw new Error('El bot no puede eliminar uno o más roles por permisos o jerarquía. No se eliminó ninguno.')
+          }
+
+          const eliminados: string[] = []
+          const fallidos: string[] = []
+          for (const rol of rolesActuales) {
+            try {
+              await rol.delete(razon(mensaje))
+              eliminados.push(rol.name)
+            } catch (error) {
+              console.error(`[IA administración] No se pudo eliminar el rol ${rol.id}:`, error)
+              fallidos.push(rol.name)
+            }
+          }
+          if (fallidos.length) {
+            const prefijo = eliminados.length
+              ? `Se eliminaron ${eliminados.map((nombre) => `**${textoSeguro(nombre)}**`).join(', ')}. `
+              : 'No se eliminó ningún rol. '
+            throw new Error(`${prefijo}No se pudieron eliminar ${fallidos.map((nombre) => `**${textoSeguro(nombre)}**`).join(', ')}; revisa los permisos y la jerarquía del bot.`)
+          }
+          return `${eliminados.length === 1 ? 'Rol eliminado' : 'Roles eliminados'}: ${eliminados.map((nombre) => `**${textoSeguro(nombre)}**`).join(', ')}.`
         },
       }
     }
@@ -539,7 +635,7 @@ export async function manejarSolicitudAdministrativa(mensaje: Message, texto: st
 
   let operacion: OperacionAdministrativa
   try {
-    operacion = crearOperacion(mensaje, limpiarPrefijo(texto), intencion, botId)
+    operacion = await crearOperacion(mensaje, limpiarPrefijo(texto), intencion, botId)
   } catch (error) {
     const detalle = error instanceof Error ? error.message : 'Revisa la solicitud y vuelve a intentarlo.'
     await responder(mensaje, 'Solicitud incompleta', detalle, coloresEmbed.aviso)

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -16,12 +17,12 @@ import {
   User,
   ModalSubmitInteraction,
 } from 'discord.js'
-import type { Message, TextChannel } from 'discord.js'
+import type { GuildMember, Message, TextChannel } from 'discord.js'
 import { CategoriaTicket, db } from '@rp-chile/db'
 import { config } from '../config'
 import { asegurarUsuario } from '../utils/usuarios'
 import { crearEmbed } from '../utils/embeds'
-import { enviarComponentsV2 } from '../utils/components-v2'
+import { comoComponentsV2, enviarComponentsV2 } from '../utils/components-v2'
 import { crearSistemaIA, leerAjusteIA } from './ia'
 import {
   devolverUso,
@@ -33,6 +34,20 @@ import {
 } from '../utils/ia'
 
 const efimero = MessageFlags.Ephemeral
+const canalTranscripcionesTicketId = '1571736144515833898'
+const expiracionConfirmacionCierreMs = 2 * 60_000
+const tamanioParteTranscripcionBytes = 7_000_000
+
+interface ConfirmacionCierreTicket {
+  ticketId: string
+  canalId: string
+  servidorId: string
+  usuarioId: string
+  venceEn: number
+}
+
+const confirmacionesCierreTicket = new Map<string, ConfirmacionCierreTicket>()
+const cierresTicketEnCurso = new Set<string>()
 
 export const soporteData = new SlashCommandBuilder()
   .setName('soporte')
@@ -115,6 +130,7 @@ async function ejecutarTicketPanel(i: ChatInputCommandInteraction) {
 }
 
 export async function manejarBotonTicket(i: ButtonInteraction) {
+  if (i.customId.startsWith('ticketpanel:eliminar:')) return manejarConfirmacionCierreTicket(i)
   if (i.customId !== 'ticketpanel:abrir') return
   if (!i.inCachedGuild()) return i.reply({ content: 'Usa el panel dentro del servidor.', flags: efimero })
   if (!config.roles.soporte) return i.reply({ content: 'El equipo de soporte no está configurado.', flags: efimero })
@@ -122,6 +138,304 @@ export async function manejarBotonTicket(i: ButtonInteraction) {
   const modal = new ModalBuilder().setCustomId(ticketModalId).setTitle('Abrir ticket')
     .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(asunto))
   return i.showModal(modal)
+}
+
+function limpiarConfirmacionesCierreTicket() {
+  const ahora = Date.now()
+  for (const [id, confirmacion] of confirmacionesCierreTicket) {
+    if (confirmacion.venceEn <= ahora) confirmacionesCierreTicket.delete(id)
+  }
+}
+
+function esSolicitudEliminarTicket(mensaje: Message) {
+  const botId = mensaje.client.user?.id
+  if (!botId || !mensaje.mentions.users.has(botId)) return false
+  const texto = mensaje.content.replace(/<@!?\d+>/g, ' ').toLocaleLowerCase('es-CL')
+  return /\b(?:elimina|eliminar|borra|borrar)\b.*\b(?:ticket|canal)\b/.test(texto)
+}
+
+function tieneAccesoDeEquipoAsignado(canal: TextChannel, miembro: GuildMember) {
+  const rolesAsignables = [
+    config.roles.fundacion,
+    config.roles.juntaAdministrativa,
+    config.roles.moderador,
+    config.roles.soporte,
+  ].filter((id): id is string => !!id)
+  return rolesAsignables.some((id) => {
+    const permisos = canal.permissionOverwrites.cache.get(id)?.allow
+    return miembro.roles.cache.has(id) &&
+      permisos?.has(PermissionFlagsBits.ViewChannel) &&
+      permisos.has(PermissionFlagsBits.SendMessages)
+  })
+}
+
+function puedeEliminarTicket(
+  canal: TextChannel,
+  miembro: GuildMember,
+  propietarioDiscordId: string,
+) {
+  return miembro.id === propietarioDiscordId || tieneAccesoDeEquipoAsignado(canal, miembro)
+}
+
+async function verificarCanalTranscripciones(guild: Guild) {
+  const canal = await guild.channels.fetch(canalTranscripcionesTicketId)
+  if (
+    !canal ||
+    (canal.type !== ChannelType.GuildText && canal.type !== ChannelType.GuildAnnouncement) ||
+    !canal.isSendable()
+  ) {
+    throw new Error(`No se encontró un canal de texto accesible con ID ${canalTranscripcionesTicketId}.`)
+  }
+  const bot = await guild.members.fetchMe()
+  const permisos = canal.permissionsFor(bot)
+  if (
+    !permisos?.has(PermissionFlagsBits.ViewChannel) ||
+    !permisos.has(PermissionFlagsBits.SendMessages) ||
+    !permisos.has(PermissionFlagsBits.AttachFiles)
+  ) {
+    throw new Error('Al bot le faltan permisos para ver el canal de transcripciones, enviar mensajes o adjuntar archivos.')
+  }
+}
+
+async function leerTranscripcionTicket(canal: TextChannel) {
+  const mensajes: Message[] = []
+  let antesDe: string | undefined
+  while (true) {
+    const pagina = await canal.messages.fetch({ limit: 100, ...(antesDe && { before: antesDe }) })
+    if (!pagina.size) break
+    mensajes.push(...pagina.values())
+    const mensajeMasAntiguo = pagina.last()
+    if (!mensajeMasAntiguo || pagina.size < 100 || mensajeMasAntiguo.id === antesDe) break
+    antesDe = mensajeMasAntiguo.id
+  }
+
+  mensajes.sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+  return mensajes.map((mensaje) => {
+    const autor = mensaje.member?.displayName ?? mensaje.author.tag
+    const lineas = [
+      mensaje.content,
+      ...mensaje.embeds.map((embed) => `Embed: ${JSON.stringify(embed.toJSON())}`),
+      ...(mensaje.components.length
+        ? [`Componentes: ${JSON.stringify(mensaje.components.map((componente) => componente.toJSON()))}`]
+        : []),
+      ...mensaje.attachments.map((archivo) => `Adjunto: ${archivo.name ?? 'archivo'} — ${archivo.url}`),
+    ].filter((linea) => linea.trim())
+    return `[${mensaje.createdAt.toISOString()}] ${autor} (${mensaje.author.id})\n${lineas.join('\n') || '[mensaje sin texto]'}`
+  }).join('\n\n')
+}
+
+function dividirTranscripcion(texto: string) {
+  const partes: string[] = []
+  let actual = ''
+  for (const bloque of texto.split(/(?<=\n)\n/)) {
+    if (actual && Buffer.byteLength(actual + bloque, 'utf8') > tamanioParteTranscripcionBytes) {
+      partes.push(actual)
+      actual = ''
+    }
+    actual += bloque
+  }
+  if (actual) partes.push(actual)
+  return partes.length ? partes : ['Transcripción vacía.']
+}
+
+async function archivarTranscripcionTicket(
+  guild: Guild,
+  ticket: { numero: number; asunto: string; usuario: { discordId: string } },
+  solicitadoPor: string,
+  transcripcion: string,
+) {
+  const canal = await guild.channels.fetch(canalTranscripcionesTicketId)
+  if (
+    !canal ||
+    (canal.type !== ChannelType.GuildText && canal.type !== ChannelType.GuildAnnouncement) ||
+    !canal.isSendable()
+  ) {
+    throw new Error(`No se encontró un canal de texto accesible con ID ${canalTranscripcionesTicketId}.`)
+  }
+  const bot = await guild.members.fetchMe()
+  const permisos = canal.permissionsFor(bot)
+  if (
+    !permisos?.has(PermissionFlagsBits.ViewChannel) ||
+    !permisos.has(PermissionFlagsBits.SendMessages) ||
+    !permisos.has(PermissionFlagsBits.AttachFiles)
+  ) {
+    throw new Error('Al bot le faltan permisos para guardar la transcripción en el canal configurado.')
+  }
+
+  const partes = dividirTranscripcion(transcripcion)
+  for (let inicio = 0; inicio < partes.length; inicio += 10) {
+    const lote = partes.slice(inicio, inicio + 10)
+    await enviarComponentsV2(canal, {
+      content: `Transcripción del ticket #${ticket.numero} · ${ticket.asunto}\nPropietario: <@${ticket.usuario.discordId}> · Cerrado por: <@${solicitadoPor}> · Parte ${Math.floor(inicio / 10) + 1}`,
+      files: lote.map((parte, indice) => ({
+        attachment: Buffer.from(parte, 'utf8'),
+        name: `ticket-${ticket.numero}-transcripcion-${inicio + indice + 1}.txt`,
+      })),
+      allowedMentions: { parse: [] },
+    })
+  }
+}
+
+async function manejarSolicitudCierreTicket(mensaje: Message, ticket: {
+  id: string
+  numero: number
+  usuario: { discordId: string }
+}) {
+  const canal = mensaje.channel as TextChannel
+  const miembro = mensaje.member ?? await mensaje.guild!.members.fetch(mensaje.author.id)
+  if (!puedeEliminarTicket(canal, miembro, ticket.usuario.discordId)) {
+    await enviarComponentsV2(canal, {
+      embeds: [crearEmbed('No autorizado', 'Solo el propietario del ticket o el equipo asignado puede solicitar su eliminación.')],
+      allowedMentions: { parse: [] },
+    })
+    return
+  }
+  if (cierresTicketEnCurso.has(ticket.id)) {
+    await enviarComponentsV2(canal, {
+      embeds: [crearEmbed('Eliminación en curso', 'Ya se confirmó la eliminación de este ticket.')],
+      allowedMentions: { parse: [] },
+    })
+    return
+  }
+  limpiarConfirmacionesCierreTicket()
+  if ([...confirmacionesCierreTicket.values()].some((confirmacion) => confirmacion.ticketId === ticket.id)) {
+    await enviarComponentsV2(canal, {
+      embeds: [crearEmbed('Confirmación pendiente', 'Ya hay una confirmación de eliminación pendiente en este ticket.')],
+      allowedMentions: { parse: [] },
+    })
+    return
+  }
+  try {
+    await verificarCanalTranscripciones(mensaje.guild!)
+  } catch (error) {
+    console.error(`[Ticket #${ticket.numero}] No está disponible el canal de transcripciones:`, error)
+    await enviarComponentsV2(canal, {
+      embeds: [crearEmbed('No se puede eliminar el ticket', error instanceof Error ? error.message : 'Revisa la configuración del canal de transcripciones.')],
+      allowedMentions: { parse: [] },
+    })
+    return
+  }
+
+  const id = randomUUID()
+  const fila = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`ticketpanel:eliminar:confirmar:${id}`).setLabel('Confirmar eliminación').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`ticketpanel:eliminar:cancelar:${id}`).setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
+  )
+  try {
+    await mensaje.reply(comoComponentsV2({
+      content: `<@${mensaje.author.id}>`,
+      embeds: [crearEmbed(
+        'Confirmar eliminación del ticket',
+        `El ticket #${ticket.numero} se eliminará cinco segundos después de confirmar. Se copiarán sus mensajes al canal de transcripciones antes de borrarlo.`,
+      )],
+      components: [fila],
+      allowedMentions: { users: [mensaje.author.id], parse: [] },
+    }))
+    confirmacionesCierreTicket.set(id, {
+      ticketId: ticket.id,
+      canalId: mensaje.channelId,
+      servidorId: mensaje.guild!.id,
+      usuarioId: mensaje.author.id,
+      venceEn: Date.now() + expiracionConfirmacionCierreMs,
+    })
+  } catch (error) {
+    console.error(`[Ticket #${ticket.numero}] No se pudo enviar la confirmación de eliminación:`, error)
+    await enviarComponentsV2(canal, {
+      embeds: [crearEmbed('No se pudo confirmar', 'No pude publicar los botones de confirmación. Revisa los permisos del bot.')],
+      allowedMentions: { parse: [] },
+    })
+  }
+}
+
+async function manejarConfirmacionCierreTicket(i: ButtonInteraction) {
+  const [prefijo, grupo, accion, id] = i.customId.split(':')
+  if (prefijo !== 'ticketpanel' || grupo !== 'eliminar' || !id || (accion !== 'confirmar' && accion !== 'cancelar')) return
+  limpiarConfirmacionesCierreTicket()
+  const pendiente = confirmacionesCierreTicket.get(id)
+  if (!pendiente) {
+    return i.reply({ content: 'Esta confirmación venció o ya fue utilizada.', flags: efimero })
+  }
+  if (
+    !i.inCachedGuild() ||
+    i.guildId !== pendiente.servidorId ||
+    i.user.id !== pendiente.usuarioId
+  ) {
+    return i.reply({ content: 'Solo quien solicitó eliminar el ticket puede confirmar o cancelar esta acción.', flags: efimero })
+  }
+
+  const ticket = await db.ticket.findUnique({
+    where: { id: pendiente.ticketId },
+    include: { usuario: { select: { discordId: true } } },
+  })
+  const canal = await i.guild.channels.fetch(pendiente.canalId)
+  if (!ticket || !canal || canal.type !== ChannelType.GuildText || ticket.canalDiscordId !== canal.id) {
+    confirmacionesCierreTicket.delete(id)
+    return i.reply({ content: 'El ticket o su canal ya no existen.', flags: efimero })
+  }
+  const miembro = i.member
+  if (!puedeEliminarTicket(canal, miembro, ticket.usuario.discordId)) {
+    confirmacionesCierreTicket.delete(id)
+    return i.reply({ content: 'Ya no tienes autorización para eliminar este ticket.', flags: efimero })
+  }
+  if (accion === 'cancelar') {
+    confirmacionesCierreTicket.delete(id)
+    return i.update(comoComponentsV2({
+      content: `<@${i.user.id}>`,
+      embeds: [crearEmbed('Eliminación cancelada', 'El ticket se conservará.', 0x808080)],
+      allowedMentions: { users: [i.user.id], parse: [] },
+    }))
+  }
+
+  confirmacionesCierreTicket.delete(id)
+  cierresTicketEnCurso.add(ticket.id)
+  try {
+    await i.update(comoComponentsV2({
+      content: `<@${i.user.id}>`,
+      embeds: [crearEmbed(
+        'Eliminación en curso',
+        'El ticket se eliminará en 5 segundos. Primero guardaré la transcripción en el canal designado.',
+      )],
+      allowedMentions: { users: [i.user.id], parse: [] },
+    }))
+  } catch (error) {
+    cierresTicketEnCurso.delete(ticket.id)
+    throw error
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 5_000))
+  try {
+    const ticketActual = await db.ticket.findUnique({
+      where: { id: ticket.id },
+      include: { usuario: { select: { discordId: true } } },
+    })
+    const canalActual = await i.guild.channels.fetch(pendiente.canalId)
+    if (!ticketActual || !canalActual || canalActual.type !== ChannelType.GuildText) {
+      throw new Error('El ticket o su canal ya no existen.')
+    }
+    const miembroActual = await i.guild.members.fetch(i.user.id)
+    if (!puedeEliminarTicket(canalActual, miembroActual, ticketActual.usuario.discordId)) {
+      throw new Error('Ya no tienes autorización para eliminar este ticket.')
+    }
+
+    let transcripcion = ticketActual.transcripcion
+    if (!transcripcion) {
+      transcripcion = await leerTranscripcionTicket(canalActual)
+      await archivarTranscripcionTicket(i.guild, ticketActual, i.user.id, transcripcion)
+    }
+    await db.ticket.update({
+      where: { id: ticketActual.id },
+      data: { estado: 'CERRADO', cerradoEn: new Date(), transcripcion },
+    })
+    await canalActual.delete(`Ticket #${ticketActual.numero} eliminado por ${i.user.tag}`)
+  } catch (error) {
+    console.error(`[Ticket #${ticket.numero}] No se pudo completar la eliminación:`, error)
+    await i.followUp({
+      content: error instanceof Error ? error.message : 'No se pudo archivar o eliminar el ticket. El canal se conservó.',
+      flags: efimero,
+    }).catch((followUpError) => console.error(`[Ticket #${ticket.numero}] No se pudo informar el error de eliminación:`, followUpError))
+  } finally {
+    cierresTicketEnCurso.delete(ticket.id)
+  }
 }
 
 export async function manejarModalTicket(i: ModalSubmitInteraction) {
@@ -277,7 +591,13 @@ export async function manejarMensajeTicket(mensaje: Message): Promise<boolean> {
     where: { canalDiscordId: mensaje.channelId },
     include: { usuario: { select: { discordId: true } } },
   })
-  if (!ticket || ticket.estado !== 'ABIERTO') return false
+  if (!ticket) return false
+  if (esSolicitudEliminarTicket(mensaje)) {
+    await manejarSolicitudCierreTicket(mensaje, ticket)
+    return true
+  }
+  if (ticket.estado === 'CERRADO') return true
+  if (ticket.estado !== 'ABIERTO') return false
   if (ticket.usuario.discordId !== mensaje.author.id) return true
   if (clasificacionesEnCurso.has(ticket.id)) return true
 
@@ -431,7 +751,11 @@ async function derivarTicket(
     SendMessages: true,
     ReadMessageHistory: true,
   })
-  await db.ticket.update({ where: { id: ticket.id }, data: { estado: 'EN_ATENCION' } })
+  const actualizado = await db.ticket.updateMany({
+    where: { id: ticket.id, estado: 'ABIERTO' },
+    data: { estado: 'EN_ATENCION' },
+  })
+  if (!actualizado.count) return
   intentosClasificacion.delete(ticket.id)
   await enviarComponentsV2(canal, {
     content: `<@${usuarioId}> <@&${roleId}>`,
