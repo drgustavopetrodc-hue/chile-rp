@@ -8,7 +8,8 @@ import {
 } from 'discord.js'
 import { db } from '@rp-chile/db'
 import { config } from '../config'
-import { crearEmbed } from '../utils/embeds'
+import { coloresEmbed, crearEmbed } from '../utils/embeds'
+import { comoComponentsV2, editarComponentsV2 } from '../utils/components-v2'
 import {
   devolverUso,
   extraerNormativaRelevante,
@@ -201,7 +202,10 @@ async function conIA(
     }
     const r = await generar(peticion)
     const texto = limpiarSalida(r.texto) + (pie ? `\n\n${pie}` : '')
-    return i.editReply({ embeds: [crearEmbed('Respuesta de IA', texto)], allowedMentions: { parse: [] } })
+    return i.editReply(comoComponentsV2({
+      embeds: [crearEmbed('Respuesta de IA', texto)],
+      allowedMentions: { parse: [] },
+    }))
   } catch (err) {
     devolverUso(i.user.id, exento)
     console.error('[IA]', err instanceof IAError ? err.message : err)
@@ -290,9 +294,173 @@ async function resumir(i: ChatInputCommandInteraction) {
 
 const HOSTS_DISCORD = new Set(['cdn.discordapp.com', 'media.discordapp.net'])
 
+type AccionMencionIA = 'ban' | 'rol'
+
+function detectarAccionMencionIA(texto: string): AccionMencionIA | undefined {
+  const normalizado = texto
+    .toLocaleLowerCase('es-CL')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+  if (/\bpuedo\b/.test(normalizado)) return undefined
+  if (/^(?:como|por que|quien|quienes|cuando|donde|que|cual|cuales)\b/.test(normalizado)) return undefined
+  if (/\bcomo\b.{0,40}\b(?:banear|dar|poner|asignar|agregar|anadir)\b/.test(normalizado)) return undefined
+  if (/\b(?:ban|banea|baneen|banead|banealo|baneala|banear|banearlo|banearla)\b/.test(normalizado)) return 'ban'
+  if (
+    /\b(?:da|das|dar|dale|des|den|dales|pon|pone|poner|ponle|asigna|asignar|asignale|agrega|agregar|agregale|anade|anadir|anadele)\b/.test(normalizado) &&
+    /\brol\b/.test(normalizado)
+  ) return 'rol'
+  return undefined
+}
+
+async function responderAccionMencion(
+  mensaje: Message,
+  titulo: string,
+  descripcion: string,
+  color: number = coloresEmbed.principal,
+) {
+  await mensaje.reply(comoComponentsV2({
+    embeds: [crearEmbed(titulo, descripcion, color)],
+    allowedMentions: { repliedUser: false, parse: [] },
+  }))
+}
+
+async function ejecutarAccionMencion(mensaje: Message, accion: AccionMencionIA, botId: string) {
+  const miembro = mensaje.member
+  const autorizado = !!miembro && [config.roles.fundacion, config.roles.juntaAdministrativa]
+    .some((id) => !!id && miembro.roles.cache.has(id))
+  if (!autorizado) {
+    await responderAccionMencion(
+      mensaje,
+      'Acción no autorizada',
+      'Solo integrantes de Fundación o Junta Administrativa pueden solicitar esta acción.',
+      coloresEmbed.error,
+    )
+    return
+  }
+
+  const usuarios = [...mensaje.mentions.users.values()].filter((usuario) => usuario.id !== botId)
+  if (usuarios.length !== 1) {
+    await responderAccionMencion(
+      mensaje,
+      'Falta identificar a la persona',
+      'Menciona exactamente a una persona. Ejemplo: `@Bot banea @persona` o `@Bot asigna el rol @rol a @persona`.',
+      coloresEmbed.aviso,
+    )
+    return
+  }
+  const usuario = usuarios[0]
+  if (!usuario || usuario.id === mensaje.author.id) {
+    await responderAccionMencion(mensaje, 'Acción no realizada', 'No puedes usar esta función sobre ti mismo.', coloresEmbed.error)
+    return
+  }
+
+  if (accion === 'ban') {
+    if (usuario.id === mensaje.guild?.ownerId) {
+      await responderAccionMencion(mensaje, 'Acción no realizada', 'No se puede vetar al propietario del servidor.', coloresEmbed.error)
+      return
+    }
+    try {
+      const objetivo = await mensaje.guild!.members.fetch(usuario.id)
+      if (!objetivo.bannable) {
+        await responderAccionMencion(
+          mensaje,
+          'No se pudo aplicar el veto',
+          'El bot no tiene permiso suficiente o la jerarquía de roles impide vetar a esa persona.',
+          coloresEmbed.error,
+        )
+        return
+      }
+      await objetivo.ban({ reason: `Solicitud de ${mensaje.author.tag} mediante mención al bot (${mensaje.id})` })
+      await responderAccionMencion(mensaje, 'Veto aplicado', `Se vetó a **${usuario.tag}**.`, coloresEmbed.exito)
+    } catch (error) {
+      console.error('[IA acción] No se pudo vetar al usuario:', error)
+      await responderAccionMencion(
+        mensaje,
+        'No se pudo aplicar el veto',
+        'No pude completar la acción. Verifica que la persona siga en el servidor y que el bot tenga el permiso **Ban Members**.',
+        coloresEmbed.error,
+      )
+    }
+    return
+  }
+
+  const roles = [...mensaje.mentions.roles.values()]
+  if (roles.length !== 1) {
+    await responderAccionMencion(
+      mensaje,
+      'Falta identificar el rol',
+      'Menciona exactamente un rol y una persona. Ejemplo: `@Bot asigna el rol @rol a @persona`.',
+      coloresEmbed.aviso,
+    )
+    return
+  }
+  const rol = roles[0]
+  if (!rol || rol.id === mensaje.guild?.id || rol.managed) {
+    await responderAccionMencion(mensaje, 'Rol no asignable', 'Ese rol no se puede asignar manualmente.', coloresEmbed.error)
+    return
+  }
+  const permisosProtegidos = [
+    PermissionFlagsBits.Administrator,
+    PermissionFlagsBits.ManageGuild,
+    PermissionFlagsBits.ManageRoles,
+    PermissionFlagsBits.ManageChannels,
+    PermissionFlagsBits.BanMembers,
+    PermissionFlagsBits.KickMembers,
+    PermissionFlagsBits.ModerateMembers,
+    PermissionFlagsBits.ManageMessages,
+  ]
+  if (permisosProtegidos.some((permiso) => rol.permissions.has(permiso))) {
+    await responderAccionMencion(
+      mensaje,
+      'Rol protegido',
+      'Por seguridad, no asigno roles con permisos administrativos o de moderación mediante una mención a la IA.',
+      coloresEmbed.error,
+    )
+    return
+  }
+
+  try {
+    const objetivo = await mensaje.guild!.members.fetch(usuario.id)
+    if (!rol.editable || !objetivo.manageable) {
+      await responderAccionMencion(
+        mensaje,
+        'No se pudo asignar el rol',
+        'El bot no tiene permiso suficiente o la jerarquía de roles impide modificar a esa persona o asignar ese rol.',
+        coloresEmbed.error,
+      )
+      return
+    }
+    if (objetivo.roles.cache.has(rol.id)) {
+      await responderAccionMencion(mensaje, 'Sin cambios', `**${usuario.tag}** ya tiene el rol **${rol.name}**.`, coloresEmbed.aviso)
+      return
+    }
+    await objetivo.roles.add(rol, `Solicitud de ${mensaje.author.tag} mediante mención al bot (${mensaje.id})`)
+    await responderAccionMencion(
+      mensaje,
+      'Rol asignado',
+      `Se asignó **${rol.name}** a **${usuario.tag}**.`,
+      coloresEmbed.exito,
+    )
+  } catch (error) {
+    console.error('[IA acción] No se pudo asignar el rol:', error)
+    await responderAccionMencion(
+      mensaje,
+      'No se pudo asignar el rol',
+      'No pude completar la acción. Verifica que la persona siga en el servidor y que el bot tenga el permiso **Manage Roles**.',
+      coloresEmbed.error,
+    )
+  }
+}
+
 export async function manejarMencionIA(mensaje: Message) {
   const bot = mensaje.client.user
   if (mensaje.author.bot || !mensaje.guild || !bot || !mensaje.mentions.has(bot)) return
+  const pregunta = mensaje.content.replace(new RegExp(`<@!?${bot.id}>`, 'g'), '').trim()
+  const accion = detectarAccionMencionIA(pregunta)
+  if (accion) {
+    await ejecutarAccionMencion(mensaje, accion, bot.id)
+    return
+  }
   if ((await leerAjusteIA<boolean>('ia.activo')) === false) {
     await mensaje.reply({ content: 'La IA está desactivada por el momento.', allowedMentions: { repliedUser: false } })
     return
@@ -322,7 +490,6 @@ export async function manejarMencionIA(mensaje: Message) {
     allowedMentions: { repliedUser: false },
   })
   try {
-    const pregunta = mensaje.content.replace(new RegExp(`<@!?${bot.id}>`, 'g'), '').trim()
     const peticion: Peticion = {
       sistema: await crearSistemaIA(
         'Responde a la mención del usuario. Para asuntos del servidor, usa únicamente la normativa oficial y las instrucciones ' +
@@ -334,7 +501,7 @@ export async function manejarMencionIA(mensaje: Message) {
       maxTokens: 1500,
     }
     const resultado = await generar(peticion)
-    await respuesta.edit({
+    await editarComponentsV2(respuesta, {
       content: '',
       embeds: [crearEmbed('Respuesta de IA', limpiarSalida(resultado.texto, 1900))],
       allowedMentions: { parse: [] },

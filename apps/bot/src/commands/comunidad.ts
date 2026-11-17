@@ -21,7 +21,7 @@ import { CategoriaTicket, db } from '@rp-chile/db'
 import { config } from '../config'
 import { asegurarUsuario } from '../utils/usuarios'
 import { crearEmbed } from '../utils/embeds'
-import { enviarComponentsV2 } from '../utils/components-v2'
+import { editarComponentsV2, enviarComponentsV2 } from '../utils/components-v2'
 import { crearSistemaIA, leerAjusteIA } from './ia'
 import {
   devolverUso,
@@ -88,11 +88,19 @@ export const comunidad = [
 async function ejecutarSoporte(i: ChatInputCommandInteraction) {
   if (!i.inCachedGuild()) return i.reply({ content: 'Usa este comando dentro del servidor.', flags: efimero })
   if (!config.roles.soporte) return i.reply({ content: 'Falta configurar ROL_SOPORTE_ID.', flags: efimero })
+  await i.deferReply({ flags: efimero })
   const asunto = i.options.getString('asunto', true)
   const categoria = (i.options.getString('categoria') ?? 'SOPORTE') as CategoriaTicket
-  const resultado = await crearTicket(i.guild, i.user, asunto, categoria)
-  if ('existente' in resultado && resultado.existente) return i.reply({ content: `Ya tienes un ticket abierto: <#${resultado.existente.canalDiscordId}>`, flags: efimero })
-  return i.reply({ content: `Ticket **#${resultado.ticket.numero}** creado: ${resultado.canal}.`, flags: efimero })
+  try {
+    const resultado = await crearTicket(i.guild, i.user, asunto, categoria)
+    if ('existente' in resultado && resultado.existente) {
+      return i.editReply({ content: `Ya tienes un ticket abierto: <#${resultado.existente.canalDiscordId}>` })
+    }
+    return i.editReply({ content: `Ticket **#${resultado.ticket.numero}** creado: ${resultado.canal}.` })
+  } catch (error) {
+    console.error(`[Ticket] No se pudo crear un canal para ${i.user.tag}:`, error)
+    return i.editReply({ content: mensajeErrorCreacionTicket(error) })
+  }
 }
 
 async function ejecutarTicketPanel(i: ChatInputCommandInteraction) {
@@ -120,9 +128,29 @@ export async function manejarModalTicket(i: ModalSubmitInteraction) {
   if (i.customId !== ticketModalId) return
   if (!i.inCachedGuild()) return i.reply({ content: 'Usa este formulario dentro del servidor.', flags: efimero })
   if (!config.roles.soporte) return i.reply({ content: 'El equipo de soporte no está configurado.', flags: efimero })
-  const resultado = await crearTicket(i.guild, i.user, i.fields.getTextInputValue('asunto'), 'SOPORTE')
-  if ('existente' in resultado && resultado.existente) return i.reply({ content: `Ya tienes un ticket abierto: <#${resultado.existente.canalDiscordId}>`, flags: efimero })
-  return i.reply({ content: `Ticket **#${resultado.ticket.numero}** creado: ${resultado.canal}.`, flags: efimero })
+  await i.deferReply({ flags: efimero })
+  try {
+    const resultado = await crearTicket(i.guild, i.user, i.fields.getTextInputValue('asunto'), 'SOPORTE')
+    if ('existente' in resultado && resultado.existente) {
+      return i.editReply({ content: `Ya tienes un ticket abierto: <#${resultado.existente.canalDiscordId}>` })
+    }
+    return i.editReply({ content: `Ticket **#${resultado.ticket.numero}** creado: ${resultado.canal}.` })
+  } catch (error) {
+    console.error(`[Ticket] No se pudo crear un canal para ${i.user.tag}:`, error)
+    return i.editReply({ content: mensajeErrorCreacionTicket(error) })
+  }
+}
+
+function mensajeErrorCreacionTicket(error: unknown) {
+  const codigo = typeof error === 'object' && error !== null && 'code' in error ? Number(error.code) : undefined
+  if (codigo === 50013) {
+    return 'Discord no permitió crear el canal. Revisa que el bot tenga **Gestionar canales** y **Gestionar roles**, y que su rol esté sobre los permisos que necesita aplicar.'
+  }
+  if (codigo === 50001 || codigo === 50035) {
+    return 'No se pudo acceder a la categoría configurada para tickets. Revisa `CATEGORIA_TICKETS_ID` y los permisos del bot en esa categoría.'
+  }
+  if (codigo === 30013) return 'El servidor alcanzó el máximo de canales de Discord y no puede crear otro ticket.'
+  return 'No pude crear el canal del ticket. Revisa los permisos **Gestionar canales** y **Gestionar roles** del bot, la categoría de tickets y los registros de Railway.'
 }
 
 async function crearTicket(guild: Guild, usuarioDiscord: User, asunto: string, categoria: CategoriaTicket) {
@@ -155,7 +183,12 @@ async function crearTicket(guild: Guild, usuarioDiscord: User, asunto: string, c
     })
     return { canal, ticket }
   } catch (error) {
-    await canal.delete('No se pudo registrar el ticket en la base de datos').catch(() => {})
+    await db.ticket.deleteMany({ where: { canalDiscordId: canal.id } }).catch((cleanupError) => {
+      console.error(`[Ticket] No se pudo limpiar el registro asociado al canal ${canal.id}:`, cleanupError)
+    })
+    await canal.delete('No se pudo completar la creación del ticket').catch((cleanupError) => {
+      console.error(`[Ticket] No se pudo eliminar el canal incompleto ${canal.id}:`, cleanupError)
+    })
     throw error
   }
 }
@@ -202,7 +235,7 @@ async function responderAlAbrirTicket(
       usuario: `Asunto del ticket: ${ticket.asunto}\nCategoría: ${ticket.categoria}`,
       maxTokens: 350,
     })
-    await respuesta.edit({
+    await editarComponentsV2(respuesta, {
       content: `<@${usuario.id}>`,
       embeds: [crearEmbed('Respuesta de IA', limpiarSalida(resultado.texto, 1700))],
       allowedMentions: { users: [usuario.id] },
@@ -280,7 +313,7 @@ export async function manejarMensajeTicket(mensaje: Message): Promise<boolean> {
         const intentos = (intentosClasificacion.get(ticket.id) ?? 0) + 1
         intentosClasificacion.set(ticket.id, intentos)
         if (intentos < 2) {
-          await canal.send({
+          await enviarComponentsV2(canal, {
             content: `<@${mensaje.author.id}>`,
             embeds: [crearEmbed(
               'Pregunta para continuar',
@@ -382,7 +415,7 @@ async function derivarTicket(
   })
   await db.ticket.update({ where: { id: ticket.id }, data: { estado: 'EN_ATENCION' } })
   intentosClasificacion.delete(ticket.id)
-  await canal.send({
+  await enviarComponentsV2(canal, {
     content: `<@${usuarioId}> <@&${roleId}>`,
     embeds: [crearEmbed(
       `Derivación IA · ${destinoFinal} · ${gravedad}`,

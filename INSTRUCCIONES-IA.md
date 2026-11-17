@@ -20,11 +20,11 @@ En `apps/bot/src/commands/index.ts` agrega estas dos cosas:
    export const comandos: Comando[] = [ ..., codigoPenal, ia ]
    ```
 
-## 3. Conseguir las claves (gratis)
-- **Gemini (principal):** entra a https://aistudio.google.com/apikey, inicia sesión con tu cuenta de Google y pulsa "Create API key". Copia la clave en `GEMINI_API_KEY`.
-- **Groq (respaldo):** https://console.groq.com/keys → "Create API Key" → `GROQ_API_KEY`. El modelo predeterminado es `openai/gpt-oss-120b`.
-- **OpenRouter (segundo respaldo):** configura `OPENROUTER_API_KEY`; el modelo gratuito predeterminado es `inclusionai/ling-3.2-flash:free`.
-- Con una sola clave ya funciona. Con las dos, si Gemini agota su cupo el bot pasa a Groq automáticamente.
+## 3. Conseguir las claves
+- **Groq (principal):** https://console.groq.com/keys → "Create API Key" → `GROQ_API_KEY`. El modelo predeterminado es `openai/gpt-oss-120b`.
+- **Gemini (respaldo):** entra a https://aistudio.google.com/apikey, inicia sesión con tu cuenta de Google y pulsa "Create API key". Copia la clave en `GEMINI_API_KEY`.
+- **OpenRouter (segundo respaldo):** configura `OPENROUTER_API_KEY`; el modelo predeterminado es `inclusionai/ling-3.2-flash:free`.
+- Si Groq falla o agota su cupo, el bot prueba Gemini y luego OpenRouter.
 
 Las claves van en `apps/bot/.env` (y en *Variables* de Railway). Nunca las subas a GitHub.
 
@@ -38,9 +38,16 @@ En Discord (como administrador):
 2. Opcional: `/ia reglas archivo:` (sube un .txt con instrucciones complementarias) o `/ia reglas texto:`.
 3. `/ia preguntar pregunta:¿Qué pasa si hago RDM?`
 
-También puedes mencionar al bot en un canal del servidor para que responda. Está sujeto a los mismos límites diarios y espera entre usos.
+También puedes mencionar al bot en un canal del servidor para que responda. Las respuestas se publican en contenedores de Components V2.
 
 Al abrir un ticket, la IA responde primero y pide detalles; después deriva los casos graves a Fundación o Junta Administrativa, los reportes de roleplay y apelaciones a Moderación, y las dudas normales a Soporte. Los IDs configurados por defecto son los que se indicaron para esos cuatro roles; se pueden cambiar con `ROL_FUNDACION_ID`, `ROL_JUNTA_ADMINISTRATIVA_ID`, `ROL_MODERADOR_ID` y `ROL_SOPORTE_ID`.
+
+### Acciones con mención al bot
+- Solo miembros de Fundación o Junta Administrativa pueden solicitar que el bot vete a alguien o le asigne un rol.
+- Menciona exactamente a una persona para vetarla: `@Bot banea @persona`.
+- Para asignar un rol, menciona exactamente un rol y una persona: `@Bot asigna el rol @rol a @persona`.
+- La persona y el rol deben ser asignables por el bot según sus permisos y jerarquía. Por seguridad, no asigna roles con permisos administrativos o de moderación. No se ejecutan preguntas sobre cómo hacer estas acciones.
+- El bot registra la solicitud en el motivo del registro de auditoría de Discord. Estas acciones no requieren que los proveedores de IA estén disponibles.
 
 ## Comandos
 | Comando | Quién | Qué hace |
@@ -56,4 +63,4 @@ Al abrir un ticket, la IA responde primero y pide detalles; después deriva los 
 - El bot no impone límites diarios ni espera entre usos. Las cuotas, límites de solicitudes/tokens y posibles costos de Gemini, Groq u OpenRouter siguen aplicando. Las variables antiguas `IA_LIMITE_USUARIO_DIARIO`, `IA_LIMITE_GLOBAL_DIARIO` e `IA_COOLDOWN_SEGUNDOS` ya no tienen efecto.
 - Los planes gratuitos pueden usar lo que envías para mejorar sus modelos. No cargues datos personales reales ni información privada de jugadores.
 - Los cupos y los nombres de modelos gratuitos cambian. Si `/ia estado probar:True` falla, revisa en Google AI Studio qué modelo está disponible y ponlo en `GEMINI_MODEL`.
-- La IA nunca sanciona ni decide nada: solo responde, redacta borradores y resume.
+- El bot no decide sanciones por sí solo: solo aplica un veto cuando un miembro autorizado lo solicita explícitamente mediante una mención y una persona mencionada.
