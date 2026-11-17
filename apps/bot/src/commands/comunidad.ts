@@ -154,19 +154,33 @@ function esSolicitudEliminarTicket(mensaje: Message) {
   return /\b(?:elimina|eliminar|borra|borrar)\b.*\b(?:ticket|canal)\b/.test(texto)
 }
 
-function tieneAccesoDeEquipoAsignado(canal: TextChannel, miembro: GuildMember) {
+function esSolicitudReasignarAFundacion(mensaje: Message) {
+  const botId = mensaje.client.user?.id
+  if (!botId || !mensaje.mentions.users.has(botId)) return false
+  const texto = mensaje.content
+    .replace(/<@!?\d+>/g, ' ')
+    .toLocaleLowerCase('es-CL')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+  return /\b(?:reasigna|reasignar)\b.*\bticket\b.*\ba\s+(?:la\s+)?fundacion\b/.test(texto)
+}
+
+function rolesAsignadosTicket(canal: TextChannel) {
   const rolesAsignables = [
     config.roles.fundacion,
     config.roles.juntaAdministrativa,
     config.roles.moderador,
     config.roles.soporte,
   ].filter((id): id is string => !!id)
-  return rolesAsignables.some((id) => {
+  return rolesAsignables.filter((id) => {
     const permisos = canal.permissionOverwrites.cache.get(id)?.allow
-    return miembro.roles.cache.has(id) &&
-      permisos?.has(PermissionFlagsBits.ViewChannel) &&
+    return permisos?.has(PermissionFlagsBits.ViewChannel) &&
       permisos.has(PermissionFlagsBits.SendMessages)
   })
+}
+
+function tieneAccesoDeEquipoAsignado(canal: TextChannel, miembro: GuildMember) {
+  return rolesAsignadosTicket(canal).some((id) => miembro.roles.cache.has(id))
 }
 
 function puedeEliminarTicket(
@@ -197,7 +211,125 @@ async function verificarCanalTranscripciones(guild: Guild) {
   }
 }
 
-async function leerTranscripcionTicket(canal: TextChannel) {
+function escaparHtml(texto: string) {
+  return texto.replace(/[&<>"']/g, (caracter) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[caracter]!)
+}
+
+function urlSegura(valor: string | undefined) {
+  if (!valor) return undefined
+  try {
+    const url = new URL(valor)
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function extraerTextoComponentes(valor: unknown): string[] {
+  if (Array.isArray(valor)) return valor.flatMap(extraerTextoComponentes)
+  if (!valor || typeof valor !== 'object') return []
+  const datos = valor as Record<string, unknown>
+  const texto = typeof datos.content === 'string' ? [datos.content] : []
+  const hijos = Array.isArray(datos.components) ? extraerTextoComponentes(datos.components) : []
+  return [...texto, ...hijos]
+}
+
+function renderizarEmbed(embed: Message['embeds'][number]) {
+  const titulo = embed.url && urlSegura(embed.url)
+    ? `<a href="${escaparHtml(urlSegura(embed.url)!)}" target="_blank" rel="noopener noreferrer">${escaparHtml(embed.title ?? 'Abrir enlace')}</a>`
+    : escaparHtml(embed.title ?? '')
+  const campos = embed.fields.map((campo) =>
+    `<div class="embed-field"><strong>${escaparHtml(campo.name)}</strong><p>${escaparHtml(campo.value)}</p></div>`,
+  ).join('')
+  const enlacesMedia = [embed.image?.url, embed.thumbnail?.url]
+    .map(urlSegura)
+    .filter((url): url is string => !!url)
+    .map((url) => `<a href="${escaparHtml(url)}" target="_blank" rel="noopener noreferrer">Ver imagen del embed</a>`)
+    .join(' ')
+  const partes = [
+    titulo && `<h3>${titulo}</h3>`,
+    embed.description && `<p>${escaparHtml(embed.description)}</p>`,
+    campos,
+    embed.footer?.text && `<small>${escaparHtml(embed.footer.text)}</small>`,
+    enlacesMedia,
+  ].filter((parte): parte is string => !!parte)
+  return `<section class="embed">${partes.join('')}</section>`
+}
+
+function renderizarMensajeTranscripcion(mensaje: Message) {
+  const autor = mensaje.member?.displayName ?? mensaje.author.tag
+  const fecha = mensaje.createdAt.toLocaleString('es-CL', { timeZone: 'America/Santiago' })
+  const contenido = mensaje.content.trim()
+    ? `<div class="message-content">${escaparHtml(mensaje.content)}</div>`
+    : ''
+  const componentes = extraerTextoComponentes(mensaje.components.map((componente) => componente.toJSON()))
+    .map((texto) => `<div class="message-content component-text">${escaparHtml(texto)}</div>`)
+    .join('')
+  const embeds = mensaje.embeds.map(renderizarEmbed).join('')
+  const adjuntos = [...mensaje.attachments.values()].map((archivo) => {
+    const url = urlSegura(archivo.url)
+    if (!url) return ''
+    return `<li><a href="${escaparHtml(url)}" target="_blank" rel="noopener noreferrer">${escaparHtml(archivo.name ?? 'Descargar archivo')}</a>${archivo.size ? ` <span>(${Math.ceil(archivo.size / 1024)} KB)</span>` : ''}</li>`
+  }).join('')
+  const contenidoAdjuntos = adjuntos ? `<ul class="attachments">${adjuntos}</ul>` : ''
+  const cuerpo = contenido || componentes || embeds || contenidoAdjuntos
+    ? `${contenido}${componentes}${embeds}${contenidoAdjuntos}`
+    : '<p class="empty">Mensaje sin texto ni adjuntos.</p>'
+
+  return `<article class="message"><header class="message-header"><strong>${escaparHtml(autor)}</strong><span class="user-id">${escaparHtml(mensaje.author.id)}</span><time datetime="${mensaje.createdAt.toISOString()}">${escaparHtml(fecha)}</time></header><div class="message-body">${cuerpo}</div></article>`
+}
+
+function crearDocumentoTranscripcion(
+  ticket: { numero: number; asunto: string; usuario: { discordId: string } },
+  solicitadoPor: string,
+  mensajes: string[],
+  numeroParte: number,
+  totalPartes: number,
+) {
+  return `<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>Transcripción del ticket #${ticket.numero}</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;background:#111318;color:#e6e8ed}
+*{box-sizing:border-box}body{margin:0;padding:32px 16px;background:linear-gradient(145deg,#171a22,#101116)}
+main{max-width:920px;margin:auto}.ticket-header{padding:28px;border:1px solid #303541;border-radius:16px;background:#1c2029;box-shadow:0 12px 32px #0004}
+.eyebrow{margin:0 0 8px;color:#8ab4f8;text-transform:uppercase;letter-spacing:.12em;font-size:.75rem;font-weight:700}
+h1{margin:0;font-size:clamp(1.5rem,4vw,2.2rem)}.subject{color:#c4c9d4;font-size:1.05rem}
+.metadata{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.metadata span{padding:7px 10px;border-radius:8px;background:#282e3a;color:#cbd2df;font-size:.85rem}
+h2{margin:28px 4px 12px;font-size:1.15rem}.message{margin:12px 0;padding:18px;border:1px solid #2d323d;border-radius:12px;background:#1a1d24}
+.message-header{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;color:#b9c0cc;font-size:.82rem}.message-header strong{color:#f2f4f8;font-size:.95rem}
+.user-id{font-family:ui-monospace,monospace;color:#7e8797}.message-header time{margin-left:auto;color:#929aaa}
+.message-body{margin-top:12px;line-height:1.6;overflow-wrap:anywhere}.message-content{white-space:pre-wrap;overflow-wrap:anywhere}.component-text{margin-top:8px}
+.embed{margin-top:10px;padding:12px;border-left:3px solid #7186ff;border-radius:4px;background:#222631}.embed h3{margin:0 0 6px;font-size:1rem}.embed p{margin:6px 0;white-space:pre-wrap}.embed-field{margin:9px 0}.embed-field p{margin:3px 0}.embed small{color:#aab1bf}
+a{color:#8ab4f8;text-decoration:none}a:hover{text-decoration:underline}.attachments{padding-left:20px}.attachments li{margin:5px 0}.attachments span{color:#8f98a8}
+.empty{color:#929aaa;font-style:italic}footer{margin:24px 4px;color:#808898;font-size:.8rem}
+@media(max-width:600px){body{padding:16px 10px}.ticket-header{padding:20px}.message{padding:14px}.message-header time{width:100%;margin-left:0}}
+</style>
+</head>
+<body><main>
+<header class="ticket-header"><p class="eyebrow">Chile RP · Soporte</p><h1>Transcripción del ticket #${ticket.numero}</h1>
+<p class="subject">${escaparHtml(ticket.asunto)}</p>
+<div class="metadata"><span>Propietario: ${escaparHtml(ticket.usuario.discordId)}</span><span>Archivado por: ${escaparHtml(solicitadoPor)}</span><span>Parte ${numeroParte} de ${totalPartes}</span></div></header>
+<section><h2>Mensajes</h2>${mensajes.join('\n')}</section>
+<footer>Transcripción generada automáticamente por el bot de Chile RP.</footer>
+</main></body></html>`
+}
+
+async function leerTranscripcionTicket(
+  canal: TextChannel,
+  ticket: { numero: number; asunto: string; usuario: { discordId: string } },
+  solicitadoPor: string,
+) {
   const mensajes: Message[] = []
   let antesDe: string | undefined
   while (true) {
@@ -210,39 +342,61 @@ async function leerTranscripcionTicket(canal: TextChannel) {
   }
 
   mensajes.sort((a, b) => a.createdTimestamp - b.createdTimestamp)
-  return mensajes.map((mensaje) => {
-    const autor = mensaje.member?.displayName ?? mensaje.author.tag
-    const lineas = [
-      mensaje.content,
-      ...mensaje.embeds.map((embed) => `Embed: ${JSON.stringify(embed.toJSON())}`),
-      ...(mensaje.components.length
-        ? [`Componentes: ${JSON.stringify(mensaje.components.map((componente) => componente.toJSON()))}`]
-        : []),
-      ...mensaje.attachments.map((archivo) => `Adjunto: ${archivo.name ?? 'archivo'} — ${archivo.url}`),
-    ].filter((linea) => linea.trim())
-    return `[${mensaje.createdAt.toISOString()}] ${autor} (${mensaje.author.id})\n${lineas.join('\n') || '[mensaje sin texto]'}`
-  }).join('\n\n')
+  const tarjetas = mensajes.map(renderizarMensajeTranscripcion)
+  const grupos: string[][] = []
+  let actual: string[] = []
+  let bytes = 0
+  for (const tarjeta of tarjetas) {
+    const tamanio = Buffer.byteLength(tarjeta, 'utf8')
+    if (actual.length && bytes + tamanio > tamanioParteTranscripcionBytes) {
+      grupos.push(actual)
+      actual = []
+      bytes = 0
+    }
+    actual.push(tarjeta)
+    bytes += tamanio
+  }
+  if (actual.length || !grupos.length) grupos.push(actual)
+  return grupos.map((grupo, indice) => crearDocumentoTranscripcion(
+    ticket,
+    solicitadoPor,
+    grupo,
+    indice + 1,
+    grupos.length,
+  ))
 }
 
-function dividirTranscripcion(texto: string) {
-  const partes: string[] = []
-  let actual = ''
-  for (const bloque of texto.split(/(?<=\n)\n/)) {
-    if (actual && Buffer.byteLength(actual + bloque, 'utf8') > tamanioParteTranscripcionBytes) {
-      partes.push(actual)
-      actual = ''
-    }
-    actual += bloque
+function leerDocumentosTranscripcionGuardada(
+  texto: string,
+): string[] | undefined {
+  if (texto.trimStart().toLowerCase().startsWith('<!doctype html>')) return [texto]
+  try {
+    const valor: unknown = JSON.parse(texto)
+    if (
+      Array.isArray(valor) &&
+      valor.length > 0 &&
+      valor.every((parte): parte is string => typeof parte === 'string' && parte.trimStart().toLowerCase().startsWith('<!doctype html>'))
+    ) return valor
+  } catch {
+    return undefined
   }
-  if (actual) partes.push(actual)
-  return partes.length ? partes : ['Transcripción vacía.']
+  return undefined
+}
+
+function convertirTranscripcionAnterior(
+  texto: string,
+  ticket: { numero: number; asunto: string; usuario: { discordId: string } },
+  solicitadoPor: string,
+) {
+  const contenidoAnterior = `<article class="message"><header class="message-header"><strong>Transcripción anterior</strong></header><div class="message-body"><div class="message-content">${escaparHtml(texto)}</div></div></article>`
+  return [crearDocumentoTranscripcion(ticket, solicitadoPor, [contenidoAnterior], 1, 1)]
 }
 
 async function archivarTranscripcionTicket(
   guild: Guild,
   ticket: { numero: number; asunto: string; usuario: { discordId: string } },
   solicitadoPor: string,
-  transcripcion: string,
+  partes: string[],
 ) {
   const canal = await guild.channels.fetch(canalTranscripcionesTicketId)
   if (
@@ -262,14 +416,13 @@ async function archivarTranscripcionTicket(
     throw new Error('Al bot le faltan permisos para guardar la transcripción en el canal configurado.')
   }
 
-  const partes = dividirTranscripcion(transcripcion)
   for (let inicio = 0; inicio < partes.length; inicio += 10) {
     const lote = partes.slice(inicio, inicio + 10)
     await enviarComponentsV2(canal, {
       content: `Transcripción del ticket #${ticket.numero} · ${ticket.asunto}\nPropietario: <@${ticket.usuario.discordId}> · Cerrado por: <@${solicitadoPor}> · Parte ${Math.floor(inicio / 10) + 1}`,
       files: lote.map((parte, indice) => ({
         attachment: Buffer.from(parte, 'utf8'),
-        name: `ticket-${ticket.numero}-transcripcion-${inicio + indice + 1}.txt`,
+        name: `ticket-${ticket.numero}-transcripcion-${inicio + indice + 1}.html`,
       })),
       allowedMentions: { parse: [] },
     })
@@ -416,11 +569,18 @@ async function manejarConfirmacionCierreTicket(i: ButtonInteraction) {
       throw new Error('Ya no tienes autorización para eliminar este ticket.')
     }
 
-    let transcripcion = ticketActual.transcripcion
-    if (!transcripcion) {
-      transcripcion = await leerTranscripcionTicket(canalActual)
-      await archivarTranscripcionTicket(i.guild, ticketActual, i.user.id, transcripcion)
+    let partesTranscripcion = ticketActual.transcripcion
+      ? leerDocumentosTranscripcionGuardada(ticketActual.transcripcion)
+      : undefined
+    if (!partesTranscripcion) {
+      partesTranscripcion = ticketActual.transcripcion
+        ? convertirTranscripcionAnterior(ticketActual.transcripcion, ticketActual, i.user.id)
+        : await leerTranscripcionTicket(canalActual, ticketActual, i.user.id)
+      await archivarTranscripcionTicket(i.guild, ticketActual, i.user.id, partesTranscripcion)
     }
+    const transcripcion = partesTranscripcion.length === 1
+      ? partesTranscripcion[0]!
+      : JSON.stringify(partesTranscripcion)
     await db.ticket.update({
       where: { id: ticketActual.id },
       data: { estado: 'CERRADO', cerradoEn: new Date(), transcripcion },
@@ -435,6 +595,132 @@ async function manejarConfirmacionCierreTicket(i: ButtonInteraction) {
   } finally {
     cierresTicketEnCurso.delete(ticket.id)
   }
+}
+
+function estadoPermiso(overwrite: ReturnType<TextChannel['permissionOverwrites']['cache']['get']>, permiso: bigint) {
+  if (!overwrite) return null
+  if (overwrite.allow.has(permiso)) return true
+  if (overwrite.deny.has(permiso)) return false
+  return null
+}
+
+function leerPermisosAccesoTicket(canal: TextChannel, rolId: string) {
+  const overwrite = canal.permissionOverwrites.cache.get(rolId)
+  if (!overwrite) return null
+  return {
+    ViewChannel: estadoPermiso(overwrite, PermissionFlagsBits.ViewChannel),
+    SendMessages: estadoPermiso(overwrite, PermissionFlagsBits.SendMessages),
+    ReadMessageHistory: estadoPermiso(overwrite, PermissionFlagsBits.ReadMessageHistory),
+  }
+}
+
+async function restaurarPermisosAccesoTicket(
+  canal: TextChannel,
+  rolId: string,
+  permisos: ReturnType<typeof leerPermisosAccesoTicket>,
+  motivo: string,
+) {
+  if (permisos) {
+    await canal.permissionOverwrites.edit(rolId, permisos, { reason: motivo })
+  } else {
+    await canal.permissionOverwrites.delete(rolId, motivo)
+  }
+}
+
+async function reasignarTicketAFundacion(
+  canal: TextChannel,
+  ticket: { id: string; numero: number; estado: string },
+  miembro: GuildMember,
+) {
+  if (ticket.estado !== 'EN_ATENCION') {
+    throw new Error('El ticket debe estar asignado a un equipo antes de poder reasignarlo.')
+  }
+  if (cierresTicketEnCurso.has(ticket.id)) throw new Error('El ticket ya está en proceso de eliminación.')
+  const rolesActuales = rolesAsignadosTicket(canal)
+  if (rolesActuales.length !== 1) {
+    throw new Error('No pude identificar un único equipo asignado en este ticket.')
+  }
+  const rolActualId = rolesActuales[0]!
+  if (!miembro.roles.cache.has(rolActualId)) {
+    throw new Error('Solo una persona con el rol del equipo actualmente asignado puede reasignar el ticket.')
+  }
+  const rolFundacionId = config.roles.fundacion
+  if (!rolFundacionId) throw new Error('No está configurado el rol de Fundación.')
+  const rolFundacion = await canal.guild.roles.fetch(rolFundacionId)
+  if (!rolFundacion) throw new Error('No encontré el rol de Fundación en este servidor.')
+  if (rolActualId === rolFundacion.id) throw new Error('Este ticket ya está asignado a Fundación.')
+
+  const bot = await canal.guild.members.fetchMe()
+  if (
+    !bot.permissions.has(PermissionFlagsBits.ManageRoles) &&
+    !bot.permissions.has(PermissionFlagsBits.ManageChannels)
+  ) {
+    throw new Error('El bot necesita Gestionar roles o Gestionar canales para reasignar el acceso al ticket.')
+  }
+
+  const permisosActuales = leerPermisosAccesoTicket(canal, rolActualId)
+  const permisosFundacion = leerPermisosAccesoTicket(canal, rolFundacion.id)
+  const motivo = `Ticket #${ticket.numero} reasignado a Fundación por ${miembro.user.tag}`
+  let fundacionActualizada = false
+  let equipoAnteriorActualizado = false
+  try {
+    await canal.permissionOverwrites.edit(rolFundacion.id, {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true,
+    }, { reason: motivo })
+    fundacionActualizada = true
+    await canal.permissionOverwrites.edit(rolActualId, {
+      ViewChannel: false,
+      SendMessages: false,
+      ReadMessageHistory: false,
+    }, { reason: motivo })
+    equipoAnteriorActualizado = true
+    const sigueActivo = await db.ticket.updateMany({
+      where: { id: ticket.id, estado: 'EN_ATENCION' },
+      data: { estado: 'EN_ATENCION' },
+    })
+    if (!sigueActivo.count) throw new Error('El ticket dejó de estar activo durante la reasignación.')
+  } catch (error) {
+    const motivoRollback = `Reversión de reasignación incompleta del ticket #${ticket.numero}`
+    if (equipoAnteriorActualizado) {
+      await restaurarPermisosAccesoTicket(canal, rolActualId, permisosActuales, motivoRollback)
+        .catch((rollbackError) => console.error(`[Ticket #${ticket.numero}] No se restauró el acceso del equipo anterior:`, rollbackError))
+    }
+    if (fundacionActualizada) {
+      await restaurarPermisosAccesoTicket(canal, rolFundacion.id, permisosFundacion, motivoRollback)
+        .catch((rollbackError) => console.error(`[Ticket #${ticket.numero}] No se revirtió el acceso de Fundación:`, rollbackError))
+    }
+    throw error
+  }
+  return rolFundacion.id
+}
+
+async function manejarSolicitudReasignacionFundacion(
+  mensaje: Message,
+  ticket: { id: string; numero: number; estado: string },
+) {
+  const canal = mensaje.channel as TextChannel
+  const miembro = mensaje.member ?? await mensaje.guild!.members.fetch(mensaje.author.id)
+  let rolFundacionId: string
+  try {
+    rolFundacionId = await reasignarTicketAFundacion(canal, ticket, miembro)
+  } catch (error) {
+    await enviarComponentsV2(canal, {
+      embeds: [crearEmbed(
+        'No se pudo reasignar el ticket',
+        error instanceof Error ? error.message : 'Revisa la asignación y los permisos del bot.',
+        0xed4245,
+      )],
+      allowedMentions: { parse: [] },
+    })
+    return
+  }
+  await enviarComponentsV2(canal, {
+    content: `<@${mensaje.author.id}> <@&${rolFundacionId}>`,
+    embeds: [crearEmbed('Ticket reasignado a Fundación', `El equipo anterior perdió acceso al ticket #${ticket.numero}.`)],
+    allowedMentions: { users: [mensaje.author.id], roles: [rolFundacionId] },
+  })
 }
 
 export async function manejarModalTicket(i: ModalSubmitInteraction) {
@@ -591,6 +877,10 @@ export async function manejarMensajeTicket(mensaje: Message): Promise<boolean> {
     include: { usuario: { select: { discordId: true } } },
   })
   if (!ticket) return false
+  if (esSolicitudReasignarAFundacion(mensaje)) {
+    await manejarSolicitudReasignacionFundacion(mensaje, ticket)
+    return true
+  }
   if (esSolicitudEliminarTicket(mensaje)) {
     await manejarSolicitudCierreTicket(mensaje, ticket)
     return true

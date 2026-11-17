@@ -41,7 +41,7 @@ En Discord (como administrador):
 También puedes mencionar al bot en un canal del servidor para que responda. Las respuestas se publican en contenedores de Components V2.
 
 Al abrir un ticket, la IA responde primero y pide detalles. El creador puede escribir su solicitud o los datos que faltan directamente en el canal: no necesita mencionar al bot. La IA procesa esos mensajes automáticamente y deriva los casos graves a Fundación o Junta Administrativa, los reportes de roleplay y apelaciones a Moderación, y las dudas normales a Soporte. Los IDs configurados por defecto son los que se indicaron para esos cuatro roles; se pueden cambiar con `ROL_FUNDACION_ID`, `ROL_JUNTA_ADMINISTRATIVA_ID`, `ROL_MODERADOR_ID` y `ROL_SOPORTE_ID`.
-El propietario del ticket o un miembro del rol asignado puede mencionar al bot y escribir `elimina el ticket`. El bot pide confirmación; al confirmarla, espera 5 segundos, guarda una transcripción de los mensajes en el canal `1571736144515833898` y luego elimina el canal del ticket. Si no puede guardar la transcripción, conserva el ticket.
+El propietario del ticket o un miembro del rol asignado puede mencionar al bot y escribir `elimina el ticket`. El bot pide confirmación; al confirmarla, espera 5 segundos, guarda una transcripción HTML descargable y legible en navegador en el canal `1571736144515833898` y luego elimina el canal del ticket. Si no puede guardar la transcripción, conserva el ticket. Un miembro del equipo asignado también puede mencionar al bot y escribir `Reasigna el ticket a Fundación`; el acceso se transfiere al rol de Fundación y se notifica al equipo.
 
 ### Acciones con mención al bot
 - Solo miembros de Fundación o Junta Administrativa pueden solicitar las acciones administrativas descritas aquí.
