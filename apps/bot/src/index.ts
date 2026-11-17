@@ -2,6 +2,7 @@ import { Client, Events, GatewayIntentBits, MessageFlags } from 'discord.js'
 import { config } from './config'
 import { comandos } from './commands'
 import { manejarBoton, manejarModal } from './handlers/verificacion'
+import { instalarProteccionAntiRaid } from './handlers/anti-raid'
 import { manejarMencionIA } from './commands/ia'
 import { manejarConfirmacionAdministrativa } from './commands/ia-administracion'
 import { asegurarUsuario } from './utils/usuarios'
@@ -17,6 +18,8 @@ const client = new Client({
   // GuildMembers es un intent privilegiado: actívalo en el Developer Portal > Bot.
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages],
 })
+
+instalarProteccionAntiRaid(client)
 
 const mapaComandos = new Map(comandos.map((c) => [c.data.name, c]))
 

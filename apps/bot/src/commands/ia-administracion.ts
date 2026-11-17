@@ -179,7 +179,7 @@ function nombreRolNuevo(texto: string) {
   if (entreComillas) return entreComillas.trim()
 
   const sinIntroduccion = resto.replace(/^\s*(?:que\s+se\s+llame|se\s+llame|llamad[oa]|de\s+nombre|que\s+es)\s+/i, '')
-  const limite = /\b(?:por\s+encima\s+de|encima\s+de|sobre|y\s+que\s+tenga|y\s+que\s+sea|con\s+(?:permiso(?:s)?(?:\s+de)?\s+)?(?:administrador|administrator|admin)|que\s+tenga\s+(?:permiso\s+)?(?:administrador|administrator|admin))\b/i
+  const limite = /\b(?:por\s+encima\s+de|encima\s+de|sobre|por\s+debajo\s+de|debajo\s+de|y\s+que\s+tenga|y\s+que\s+sea|con\s+(?:permiso(?:s)?(?:\s+de)?\s+)?(?:administrador|administrator|admin)|que\s+tenga\s+(?:permiso\s+)?(?:administrador|administrator|admin))\b/i
   const nombre = sinIntroduccion.split(limite, 1)[0]!.replace(/^[\s"'“]+|[\s"'”.,!?]+$/g, '').trim()
   if (!nombre) throw new Error('Indica el nombre exacto del rol, por ejemplo `"Vice Presidente general"`.')
   if (nombre.length > 100) throw new Error('El nombre del rol no puede superar los 100 caracteres.')
@@ -187,15 +187,16 @@ function nombreRolNuevo(texto: string) {
 }
 
 async function resolverRolReferencia(mensaje: Message, texto: string) {
-  const relacion = texto.match(/(?:por\s+encima\s+de|encima\s+de|sobre)\s+(.+?)(?=\s+(?:y\s+que\s+tenga|y\s+que\s+sea|con\s+(?:permiso(?:s)?(?:\s+de)?\s+)?(?:administrador|administrator|admin))|$)/i)
+  const relacion = texto.match(/\b(por\s+encima\s+de|encima\s+de|sobre|por\s+debajo\s+de|debajo\s+de)\s+(.+?)(?=\s+(?:y\s+que\s+tenga|y\s+que\s+sea|con\s+(?:permiso(?:s)?(?:\s+de)?\s+)?(?:administrador|administrator|admin))|$)/i)
   if (!relacion) return undefined
 
   const menciones = [...mensaje.mentions.roles.values()]
   if (menciones.length > 1) throw new Error('Menciona solo el rol de referencia.')
   const mencionado = menciones[0]
-  if (mencionado) return mencionado
+  const direccion = normalizar(relacion[1]!).includes('debajo') ? 'debajo' : 'encima'
+  if (mencionado) return { rol: mencionado, direccion }
 
-  const nombre = relacion[1]!.replace(/^[\s"'“]+|[\s"'”.,!?]+$/g, '').trim()
+  const nombre = relacion[2]!.replace(/^[\s"'“]+|[\s"'”.,!?]+$/g, '').trim()
   if (!nombre) throw new Error('Menciona el rol de referencia o escribe su nombre exacto.')
   const roles = await mensaje.guild!.roles.fetch()
   const coincidencias = roles.filter((rol) => normalizar(rol.name) === normalizar(nombre))
@@ -204,7 +205,7 @@ async function resolverRolReferencia(mensaje: Message, texto: string) {
       ? 'Hay varios roles con ese nombre. Menciona exactamente el rol de referencia.'
       : `No encontré el rol "${nombre}". Menciónalo o escribe su nombre exacto.`)
   }
-  return coincidencias.first()!
+  return { rol: coincidencias.first()!, direccion }
 }
 
 function nombreCanalDesde(texto: string, marcador: RegExp) {
@@ -306,26 +307,36 @@ async function crearOperacion(mensaje: Message, texto: string, intencion: Intenc
       const nombre = nombreRolNuevo(texto)
       const normalizado = normalizar(texto.replace(/["“][^"”]*["”]/g, ''))
       const conAdministrador = /\b(?:que tenga|con|asignar(?:le)?|agregar(?:le)?|darle)\b.{0,40}\b(?:administrador|administrator|admin)\b/.test(normalizado)
-      const referencia = await resolverRolReferencia(mensaje, texto)
+      const relacion = await resolverRolReferencia(mensaje, texto)
+      const referencia = relacion?.rol
       const botMiembro = await guild.members.fetchMe()
       if (!botMiembro.permissions.has(PermissionFlagsBits.ManageRoles)) {
         throw new Error('El bot necesita el permiso **Gestionar roles** para crear y posicionar roles.')
       }
-      if (referencia && referencia.position + 1 >= botMiembro.roles.highest.position) {
-        throw new Error('El rol del bot debe estar por encima del rol de referencia para colocar el nuevo rol encima.')
+      const posicionSolicitada = referencia
+        ? referencia.position + (relacion?.direccion === 'debajo' ? -1 : 1)
+        : undefined
+      if (posicionSolicitada !== undefined && posicionSolicitada <= 0) {
+        throw new Error('No se puede crear un rol debajo de @everyone.')
+      }
+      if (posicionSolicitada !== undefined && posicionSolicitada >= botMiembro.roles.highest.position) {
+        throw new Error('La jerarquía del bot no permite colocar el nuevo rol en esa posición.')
       }
       return {
         titulo: 'Crear un rol',
-        detalle: `Se creará el rol **${textoSeguro(nombre)}**${referencia ? ` por encima de **${textoSeguro(referencia.name)}**` : ''}${conAdministrador
+        detalle: `Se creará el rol **${textoSeguro(nombre)}**${referencia ? ` ${relacion?.direccion === 'debajo' ? 'por debajo de' : 'por encima de'} **${textoSeguro(referencia.name)}**` : ''}${conAdministrador
           ? ' con **Administrador** (control total del servidor).'
           : ' sin permisos administrativos.'}`,
         ejecutar: async () => {
           const referenciaActual = referencia ? await guild.roles.fetch(referencia.id) : null
           if (referencia && !referenciaActual) throw new Error('El rol de referencia ya no existe.')
           const botActual = await guild.members.fetchMe()
-          const posicion = referenciaActual ? referenciaActual.position + 1 : undefined
+          const posicion = referenciaActual
+            ? referenciaActual.position + (relacion?.direccion === 'debajo' ? -1 : 1)
+            : undefined
+          if (posicion !== undefined && posicion <= 0) throw new Error('No se puede crear un rol debajo de @everyone.')
           if (posicion !== undefined && posicion >= botActual.roles.highest.position) {
-            throw new Error('El rol del bot ya no está suficientemente alto para colocar el nuevo rol ahí.')
+            throw new Error('La jerarquía del bot ya no permite colocar el nuevo rol en esa posición.')
           }
           const rol = await guild.roles.create({ name: nombre, permissions: [], reason: razon(mensaje) })
           try {
@@ -337,7 +348,7 @@ async function crearOperacion(mensaje: Message, texto: string, intencion: Intenc
             })
             throw error
           }
-          return `Rol **${textoSeguro(rol.name)}** creado${referenciaActual ? ` por encima de **${textoSeguro(referenciaActual.name)}**` : ''}${conAdministrador
+          return `Rol **${textoSeguro(rol.name)}** creado${referenciaActual ? ` ${relacion?.direccion === 'debajo' ? 'por debajo de' : 'por encima de'} **${textoSeguro(referenciaActual.name)}**` : ''}${conAdministrador
             ? ' con permiso de **Administrador**.'
             : ' sin permisos administrativos.'}`
         },
