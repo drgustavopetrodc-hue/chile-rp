@@ -8,6 +8,7 @@ import {
 } from 'discord.js'
 import { db } from '@rp-chile/db'
 import { config } from '../config'
+import { crearEmbed } from '../utils/embeds'
 import {
   devolverUso,
   extraerNormativaRelevante,
@@ -200,7 +201,7 @@ async function conIA(
     }
     const r = await generar(peticion)
     const texto = limpiarSalida(r.texto) + (pie ? `\n\n${pie}` : '')
-    return i.editReply({ content: texto, allowedMentions: { parse: [] } })
+    return i.editReply({ embeds: [crearEmbed('Respuesta de IA', texto)], allowedMentions: { parse: [] } })
   } catch (err) {
     devolverUso(i.user.id, exento)
     console.error('[IA]', err instanceof IAError ? err.message : err)
@@ -334,7 +335,8 @@ export async function manejarMencionIA(mensaje: Message) {
     }
     const resultado = await generar(peticion)
     await respuesta.edit({
-      content: limpiarSalida(resultado.texto, 1900),
+      content: '',
+      embeds: [crearEmbed('Respuesta de IA', limpiarSalida(resultado.texto, 1900))],
       allowedMentions: { parse: [] },
     })
   } catch (err) {

@@ -203,7 +203,8 @@ async function responderAlAbrirTicket(
       maxTokens: 350,
     })
     await respuesta.edit({
-      content: `<@${usuario.id}> ${limpiarSalida(resultado.texto, 1700)}`,
+      content: `<@${usuario.id}>`,
+      embeds: [crearEmbed('Respuesta de IA', limpiarSalida(resultado.texto, 1700))],
       allowedMentions: { users: [usuario.id] },
     })
   } catch (error) {
@@ -280,7 +281,11 @@ export async function manejarMensajeTicket(mensaje: Message): Promise<boolean> {
         intentosClasificacion.set(ticket.id, intentos)
         if (intentos < 2) {
           await canal.send({
-            content: `<@${mensaje.author.id}> ${limpiarSalida(clasificacion.pregunta || '¿Puedes agregar más detalles para derivar correctamente tu caso?', 1500)}`,
+            content: `<@${mensaje.author.id}>`,
+            embeds: [crearEmbed(
+              'Pregunta para continuar',
+              limpiarSalida(clasificacion.pregunta || '¿Puedes agregar más detalles para derivar correctamente tu caso?', 1500),
+            )],
             allowedMentions: { users: [mensaje.author.id] },
           })
           return true
@@ -378,7 +383,11 @@ async function derivarTicket(
   await db.ticket.update({ where: { id: ticket.id }, data: { estado: 'EN_ATENCION' } })
   intentosClasificacion.delete(ticket.id)
   await canal.send({
-    content: `<@${usuarioId}> <@&${roleId}>\n**Derivación IA · ${destinoFinal} · ${gravedad}** · Ticket #${ticket.numero}\n${limpiarSalida(resumen, 500)}`,
+    content: `<@${usuarioId}> <@&${roleId}>`,
+    embeds: [crearEmbed(
+      `Derivación IA · ${destinoFinal} · ${gravedad}`,
+      `Ticket #${ticket.numero}\n${limpiarSalida(resumen, 500)}`,
+    )],
     allowedMentions: { users: [usuarioId], roles: [roleId] },
   })
 }

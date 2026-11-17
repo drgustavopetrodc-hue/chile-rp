@@ -1,8 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { PDFParse } from 'pdf-parse'
 
-// Cliente de IA con proveedores gratuitos y control de uso.
-// Orden de prueba: Gemini → Groq → OpenRouter. Si uno falla o agota su cupo, pasa al siguiente.
+// Orden de prueba: Groq → Gemini → OpenRouter. Si uno falla o agota su cupo, pasa al siguiente.
 // Todos usan el formato "OpenAI Chat Completions", así que agregar otro proveedor es agregar una línea.
 
 export class IAError extends Error {}
@@ -100,20 +99,20 @@ interface Proveedor {
 export function proveedoresConfigurados(): Proveedor[] {
   const lista: Proveedor[] = []
   const e = process.env
-  if (e.GEMINI_API_KEY) {
-    lista.push({
-      nombre: 'Gemini',
-      base: e.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai',
-      clave: e.GEMINI_API_KEY,
-      modelo: e.GEMINI_MODEL || 'gemini-flash-latest',
-    })
-  }
   if (e.GROQ_API_KEY) {
     lista.push({
       nombre: 'Groq',
       base: e.GROQ_BASE_URL || 'https://api.groq.com/openai/v1',
       clave: e.GROQ_API_KEY,
       modelo: e.GROQ_MODEL || 'openai/gpt-oss-120b',
+    })
+  }
+  if (e.GEMINI_API_KEY) {
+    lista.push({
+      nombre: 'Gemini',
+      base: e.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai',
+      clave: e.GEMINI_API_KEY,
+      modelo: e.GEMINI_MODEL || 'gemini-flash-latest',
     })
   }
   if (e.OPENROUTER_API_KEY) {
