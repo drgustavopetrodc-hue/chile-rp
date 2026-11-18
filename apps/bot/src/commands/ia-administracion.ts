@@ -680,7 +680,7 @@ function cadenasEntreComillas(texto: string) {
   return [...texto.matchAll(/["“]([^"”]+)["”]/g)].map((coincidencia) => coincidencia[1]!)
 }
 
-async function normalizarSolicitudConIA(texto: string): Promise<ResultadoNormalizacionIA> {
+async function normalizarSolicitudConIA(texto: string, usuarioId: string): Promise<ResultadoNormalizacionIA> {
   if (!proveedoresConfigurados().length) return { estado: 'no-reconocida' }
 
   try {
@@ -702,6 +702,7 @@ async function normalizarSolicitudConIA(texto: string): Promise<ResultadoNormali
       usuario: `<solicitud>\n${textoMarcado.slice(0, 1500)}\n</solicitud>`,
       maxTokens: 180,
       temperatura: 0,
+      usuarioId,
     })
     const json = resultado.texto.trim().replace(/^```(?:json)?\s*|\s*```$/gi, '')
     const salida: unknown = JSON.parse(json)
@@ -744,7 +745,7 @@ export async function manejarSolicitudAdministrativa(mensaje: Message, texto: st
   let intencion = detectarIntencion(textoOperacion)
   if (!intencion) {
     if (mensaje.webhookId || !mensaje.guild || !mensaje.member || !estaAutorizado(mensaje.member)) return false
-    const normalizacion = await normalizarSolicitudConIA(textoOperacion)
+    const normalizacion = await normalizarSolicitudConIA(textoOperacion, mensaje.author.id)
     if (normalizacion.estado === 'no-disponible') {
       await responder(
         mensaje,

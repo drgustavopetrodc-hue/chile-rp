@@ -15,16 +15,33 @@ import { manejarSolicitudAdministrativa } from './ia-administracion'
 import {
   devolverUso,
   extraerNormativaRelevante,
+  filtroMemoriaIA,
   generar,
   IAError,
+  limitarHistorialIA,
   limpiarSalida,
+  obtenerEstadoProveedores,
+  obtenerUltimoProveedorUsado,
   proveedoresConfigurados,
+  probarProveedores,
   reservarUso,
   usoDeHoy,
+  type MensajeConversacionIA,
   type Peticion,
 } from '../utils/ia'
 
 const efimero = MessageFlags.Ephemeral
+const MAX_TURNOS_MEMORIA = 8
+const MAX_CARACTERES_HISTORIAL = 6000
+const RETENCION_MEMORIA_MS = 30 * 24 * 60 * 60 * 1000
+let ultimaDepuracionMemoria = 0
+
+interface ContextoMemoriaIA {
+  guildId: string
+  channelId: string
+  usuarioId: string
+  pregunta: string
+}
 
 const TIPOS_DOCUMENTO = {
   parte_policial: {
@@ -88,6 +105,11 @@ export const iaData = new SlashCommandBuilder()
   )
   .addSubcommand((s) =>
     s
+      .setName('olvidar')
+      .setDescription('Borra tu memoria de IA de este canal'),
+  )
+  .addSubcommand((s) =>
+    s
       .setName('redactar')
       .setDescription('Genera un borrador de documento para tu roleplay')
       .addStringOption((o) =>
@@ -139,6 +161,8 @@ async function ejecutarIA(i: ChatInputCommandInteraction) {
   switch (i.options.getSubcommand()) {
     case 'preguntar':
       return preguntar(i)
+    case 'olvidar':
+      return olvidarMemoria(i)
     case 'redactar':
       return redactar(i)
     case 'resumir':
@@ -177,12 +201,91 @@ async function guardarAjuste(clave: string, valor: string | boolean) {
   await db.configuracionServidor.upsert({ where: { clave }, create: { clave, valor }, update: { valor } })
 }
 
+function contieneDatoSensible(texto: string) {
+  return /(?:password|contrase(?:ñ|n)a|token|api[\s_-]?key|clave|secreto)\s*(?::|=|\bes\b)\s*\S+|bearer\s+[a-z0-9._-]{16,}|(?:sk|ghp|gho|xox[baprs])-[a-z0-9-]{16,}|\b[a-z0-9_-]{24}\.[a-z0-9_-]{6}\.[a-z0-9_-]{20,}\b|\b\d{1,2}\.?\d{3}\.?\d{3}-[\dkK]\b|[\w.+-]+@[\w.-]+\.[a-z]{2,}|\b(?:\+?56)?9\d{8}\b/i.test(texto)
+}
+
+function prepararTextoMemoria(texto: string, maximo: number) {
+  return texto
+    .replace(/<@!?(\d+)>|<@&\d+>|<#\d+>/g, '[mención]')
+    .replace(/@(everyone|here)/gi, '@ $1')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maximo)
+}
+
+async function cargarMemoriaIA(contexto: ContextoMemoriaIA): Promise<MensajeConversacionIA[]> {
+  try {
+    const registros = await db.memoriaIA.findMany({
+      where: {
+        ...filtroMemoriaIA(contexto.guildId, contexto.channelId, contexto.usuarioId),
+        creadoEn: { gte: new Date(Date.now() - RETENCION_MEMORIA_MS) },
+      },
+      orderBy: [{ creadoEn: 'desc' }, { id: 'desc' }],
+      take: MAX_TURNOS_MEMORIA,
+      select: { mensajeUsuario: true, respuesta: true },
+    })
+    const historial = registros.reverse().flatMap(({ mensajeUsuario, respuesta }) => [
+      { role: 'user' as const, content: mensajeUsuario },
+      { role: 'assistant' as const, content: respuesta },
+    ])
+    return limitarHistorialIA(historial, MAX_CARACTERES_HISTORIAL)
+  } catch (error) {
+    console.error('[IA memoria] No se pudo cargar el historial; continuaré sin contexto previo:', error)
+    return []
+  }
+}
+
+async function guardarMemoriaIA(contexto: ContextoMemoriaIA, respuesta: string) {
+  if (contieneDatoSensible(contexto.pregunta) || contieneDatoSensible(respuesta)) return
+
+  const mensajeUsuario = prepararTextoMemoria(contexto.pregunta, 1500)
+  const respuestaGuardada = prepararTextoMemoria(respuesta, 2000)
+  if (!mensajeUsuario || !respuestaGuardada) return
+
+  const filtro = filtroMemoriaIA(contexto.guildId, contexto.channelId, contexto.usuarioId)
+  await db.memoriaIA.create({
+    data: { ...filtro, mensajeUsuario, respuesta: respuestaGuardada },
+  })
+
+  const recientes = await db.memoriaIA.findMany({
+    where: filtro,
+    orderBy: [{ creadoEn: 'desc' }, { id: 'desc' }],
+    take: MAX_TURNOS_MEMORIA,
+    select: { id: true },
+  })
+  await db.memoriaIA.deleteMany({
+    where: { ...filtro, id: { notIn: recientes.map(({ id }) => id) } },
+  })
+
+  if (Date.now() - ultimaDepuracionMemoria >= 6 * 60 * 60 * 1000) {
+    await db.memoriaIA.deleteMany({
+      where: { creadoEn: { lt: new Date(Date.now() - RETENCION_MEMORIA_MS) } },
+    })
+    ultimaDepuracionMemoria = Date.now()
+  }
+}
+
+async function olvidarMemoria(i: ChatInputCommandInteraction) {
+  if (!i.guildId) return i.reply({ content: 'Usa este comando en un canal del servidor.', flags: efimero })
+  await i.deferReply({ flags: efimero })
+  const resultado = await db.memoriaIA.deleteMany({
+    where: filtroMemoriaIA(i.guildId, i.channelId, i.user.id),
+  })
+  return i.editReply(
+    resultado.count
+      ? `Borré ${resultado.count} turno(s) de tu memoria de IA en este canal.`
+      : 'No había memoria guardada para ti en este canal.',
+  )
+}
+
 // ───────────── Flujo común: límites → "pensando..." → IA → respuesta ─────────────
 
 async function conIA(
   i: ChatInputCommandInteraction,
   preparar: () => Promise<Peticion | string>,
   pie?: string,
+  memoria?: ContextoMemoriaIA,
 ) {
   if ((await leerAjusteIA<boolean>('ia.activo')) === false) {
     return i.reply({ content: 'La IA está desactivada por el momento.', flags: efimero })
@@ -194,42 +297,70 @@ async function conIA(
   const reserva = reservarUso(i.user.id, exento)
   if (!reserva.ok) return i.reply({ content: reserva.motivo, flags: efimero })
 
-  // Discord exige responder en 3 segundos: se avisa que se está procesando y se responde después.
-  await i.deferReply({ flags: efimero })
+  let consultaCompletada = false
+  let reservaDevuelta = false
   try {
+    // Discord exige responder en 3 segundos: se avisa que se está procesando y se responde después.
+    await i.deferReply({ flags: efimero })
     const peticion = await preparar()
     if (typeof peticion === 'string') {
       devolverUso(i.user.id, exento)
+      reservaDevuelta = true
       return i.editReply({ content: peticion, allowedMentions: { parse: [] } })
     }
-    const r = await generar(peticion)
-    const texto = limpiarSalida(r.texto) + (pie ? `\n\n${pie}` : '')
-    return i.editReply(comoComponentsV2({
+    const r = await generar({ ...peticion, usuarioId: i.user.id, cuotaReservada: true })
+    consultaCompletada = true
+    const avisoIncompleta = r.finishReason === 'length'
+      ? '\n\n-# La respuesta alcanzó el límite de salida y podría estar incompleta.'
+      : ''
+    const texto = limpiarSalida(r.texto) + avisoIncompleta + (pie ? `\n\n${pie}` : '')
+    const respuesta = await i.editReply(comoComponentsV2({
       embeds: [crearEmbed('Respuesta de IA', texto)],
       allowedMentions: { parse: [] },
     }))
+    if (memoria) {
+      try {
+        await guardarMemoriaIA(memoria, r.texto)
+      } catch (error) {
+        console.error('[IA memoria] No se pudo guardar la respuesta:', error)
+      }
+    }
+    return respuesta
   } catch (err) {
-    devolverUso(i.user.id, exento)
+    if (!consultaCompletada && !reservaDevuelta) devolverUso(i.user.id, exento)
     console.error('[IA]', err instanceof IAError ? err.message : err)
-    return i.editReply('No pude obtener una respuesta de la IA ahora mismo. Inténtalo de nuevo en unos minutos.')
+    const aviso = 'No pude obtener una respuesta de la IA ahora mismo. Inténtalo de nuevo en unos minutos.'
+    return i.deferred || i.replied
+      ? i.editReply(aviso)
+      : i.reply({ content: aviso, flags: efimero })
   }
 }
 
 // ───────────── /ia preguntar ─────────────
 
 function preguntar(i: ChatInputCommandInteraction) {
+  if (!i.guildId) return i.reply({ content: 'Usa este comando en un canal del servidor.', flags: efimero })
   const pregunta = i.options.getString('pregunta', true).trim()
+  const memoria: ContextoMemoriaIA = {
+    guildId: i.guildId,
+    channelId: i.channelId,
+    usuarioId: i.user.id,
+    pregunta,
+  }
   return conIA(i, async () => {
+    const historial = await cargarMemoriaIA(memoria)
+    const consultaConContexto = [...historial.map(({ content }) => content), pregunta].join('\n')
     return {
       sistema: await crearSistemaIA(
         'Si la pregunta es sobre el servidor o su normativa, responde solo con las fuentes oficiales. Si es de conocimiento ' +
         'general y no relacionada con el servidor, puedes responder con conocimiento general. Sé breve: máximo 150 palabras.',
-        pregunta,
+        consultaConContexto,
       ),
       usuario: pregunta,
       maxTokens: 1500,
+      historial,
     }
-  })
+  }, undefined, memoria)
 }
 
 // ───────────── /ia redactar ─────────────
@@ -332,32 +463,55 @@ export async function manejarMencionIA(mensaje: Message) {
     return
   }
 
-  const respuesta = await mensaje.reply({
-    content: 'Estoy revisando la normativa y preparando una respuesta…',
-    allowedMentions: { repliedUser: false },
-  })
+  const memoria: ContextoMemoriaIA = {
+    guildId: mensaje.guild.id,
+    channelId: mensaje.channel.id,
+    usuarioId: mensaje.author.id,
+    pregunta,
+  }
+  let respuesta: Message | undefined
+  let consultaCompletada = false
   try {
+    respuesta = await mensaje.reply({
+      content: 'Estoy revisando la normativa y preparando una respuesta…',
+      allowedMentions: { repliedUser: false },
+    })
+    const historial = await cargarMemoriaIA(memoria)
+    const consultaConContexto = [...historial.map(({ content }) => content), pregunta].join('\n')
     const peticion: Peticion = {
       sistema: await crearSistemaIA(
         'Responde a la mención del usuario. Para asuntos del servidor, usa únicamente la normativa oficial y las instrucciones ' +
         'complementarias; para preguntas generales no relacionadas, puedes usar conocimiento general. Si solo saludó o no hizo ' +
         'una pregunta clara, pídele que explique qué necesita. Sé breve y no inventes datos del servidor.',
-        pregunta,
+        consultaConContexto,
       ),
       usuario: pregunta || 'El usuario mencionó al bot sin agregar una pregunta.',
       maxTokens: 1500,
+      historial,
+      usuarioId: mensaje.author.id,
+      cuotaReservada: true,
     }
     const resultado = await generar(peticion)
+    consultaCompletada = true
     await mensaje.reply(comoComponentsV2({
       content: '',
-      embeds: [crearEmbed('Respuesta de IA', limpiarSalida(resultado.texto, 1900))],
+      embeds: [crearEmbed(
+        'Respuesta de IA',
+        limpiarSalida(resultado.texto, 1800) +
+          (resultado.finishReason === 'length' ? '\n\n-# La respuesta podría estar incompleta.' : ''),
+      )],
       allowedMentions: { parse: [] },
     }))
+    try {
+      await guardarMemoriaIA(memoria, resultado.texto)
+    } catch (error) {
+      console.error('[IA memoria] No se pudo guardar la respuesta:', error)
+    }
     await respuesta.delete().catch((error) => console.warn('[IA mención] No se pudo retirar el aviso temporal:', error))
   } catch (err) {
-    devolverUso(mensaje.author.id, exento)
+    if (!consultaCompletada) devolverUso(mensaje.author.id, exento)
     console.error('[IA mención]', err instanceof IAError ? err.message : err)
-    await respuesta.edit('No pude obtener una respuesta ahora mismo. Inténtalo de nuevo en unos minutos.')
+    if (respuesta) await respuesta.edit('No pude obtener una respuesta ahora mismo. Inténtalo de nuevo en unos minutos.')
   }
 }
 
@@ -406,24 +560,39 @@ async function estado(i: ChatInputCommandInteraction) {
 
   const [activo, reglas] = await Promise.all([leerAjusteIA<boolean>('ia.activo'), leerAjusteIA<string>('ia.reglas')])
   const proveedores = proveedoresConfigurados()
+  const estados = obtenerEstadoProveedores()
+  const ultimoProveedor = obtenerUltimoProveedorUsado()
   const uso = usoDeHoy()
 
   const lineas = [
     `**IA:** ${activo === false ? 'desactivada' : 'activa'}`,
     `**Proveedores (en orden):** ${proveedores.length ? proveedores.map((p) => `${p.nombre} (${p.modelo})`).join(' → ') : 'ninguno configurado'}`,
+    `**Disponibilidad conocida:** ${estados.length ? estados.map((p) => {
+      const estadoProveedor = p.estado === 'disponible'
+        ? 'disponible'
+        : p.estado === 'degradado'
+          ? `degradado${p.codigoHttp ? `, HTTP ${p.codigoHttp}` : ''}`
+          : p.estado === 'no_disponible'
+            ? `no disponible${p.codigoHttp ? `, HTTP ${p.codigoHttp}` : ''}`
+            : 'sin comprobar desde el último inicio'
+      const latencia = p.latenciaMs === undefined ? '' : `, ${(p.latenciaMs / 1000).toFixed(1)} s`
+      return `${p.nombre} (${p.modelo}): ${estadoProveedor}${latencia}`
+    }).join(' · ') : 'ninguno configurado'}`,
+    `**Último proveedor usado:** ${ultimoProveedor
+      ? `${ultimoProveedor.proveedor} (${ultimoProveedor.modelo}) en ${(ultimoProveedor.latenciaMs / 1000).toFixed(1)} s`
+      : 'sin consultas desde el último inicio'}`,
     `**Instrucciones complementarias:** ${reglas ? `${reglas.length} caracteres` : 'ninguna'}`,
-    `**Uso de hoy:** ${uso.global} consultas`,
-    '**Límite interno:** sin límite diario ni espera entre usos',
+    `**Uso de hoy:** ${uso.global}/${uso.limiteGlobal} consultas globales; máximo ${uso.limiteUsuario} por usuario`,
+    `**Memoria:** hasta ${MAX_TURNOS_MEMORIA} turnos por usuario y canal; retención de 30 días`,
   ]
 
   if (i.options.getBoolean('probar') && proveedores.length) {
-    const inicio = Date.now()
-    try {
-      const r = await generar({ sistema: 'Responde únicamente con la palabra OK.', usuario: 'ping', maxTokens: 200 })
-      lineas.push(`**Prueba:** ✅ respondió ${r.proveedor} (${r.modelo}) en ${((Date.now() - inicio) / 1000).toFixed(1)} s`)
-    } catch {
-      lineas.push('**Prueba:** ❌ ningún proveedor respondió. Revisa las claves y los modelos en las variables de entorno.')
-    }
+    const resultados = await probarProveedores()
+    lineas.push(`**Prueba individual:** ${resultados.map((p) => {
+      const ok = p.estado === 'disponible'
+      const latencia = p.latenciaMs === undefined ? '' : ` (${(p.latenciaMs / 1000).toFixed(1)} s)`
+      return `${ok ? '✅' : '❌'} ${p.nombre} / ${p.modelo}${latencia}${p.ultimoError ? ` — ${p.ultimoError}` : ''}`
+    }).join(' · ')}`)
   }
   return i.editReply({ content: lineas.join('\n'), allowedMentions: { parse: [] } })
 }

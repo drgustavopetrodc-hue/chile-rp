@@ -24,7 +24,10 @@ En `apps/bot/src/commands/index.ts` agrega estas dos cosas:
 - **Groq (principal):** https://console.groq.com/keys → "Create API Key" → `GROQ_API_KEY`. El modelo predeterminado es `openai/gpt-oss-120b`.
 - **Gemini (respaldo):** entra a https://aistudio.google.com/apikey, inicia sesión con tu cuenta de Google y pulsa "Create API key". Copia la clave en `GEMINI_API_KEY`.
 - **OpenRouter (segundo respaldo):** configura `OPENROUTER_API_KEY`; el modelo predeterminado es `inclusionai/ling-3.2-flash:free`.
-- Si Groq falla o agota su cupo, el bot prueba Gemini y luego OpenRouter.
+- Los modelos se pueden cambiar con `GROQ_MODEL`, `GEMINI_MODEL` y `OPENROUTER_MODEL`. Si el modelo principal de Groq deja de estar disponible, prueba `GROQ_FALLBACK_MODEL`; por defecto usa `llama-3.3-70b-versatile`, que figura en su catálogo de producción.
+- GPT-OSS usa `max_completion_tokens`, razonamiento medio y salida de razonamiento oculta; se puede ajustar `GROQ_REASONING_EFFORT` a `low`, `medium` o `high`. `GEMINI_REASONING_EFFORT` es opcional y solo se envía a modelos Gemini compatibles.
+- Ante errores temporales (429, 5xx, timeout o red), cada proveedor se reintenta una vez con backoff y jitter; luego se pasa al siguiente. Errores permanentes (por ejemplo, 400, 401, 403 o 404) no se reintentan. Una respuesta vacía no se acepta como éxito.
+- Si Groq falla o agota su cupo, el bot prueba Gemini y luego OpenRouter. No requiere instalar `@google/genai`: Gemini se usa mediante su endpoint REST oficial compatible con OpenAI.
 
 Las claves van en `apps/bot/.env` (y en *Variables* de Railway). Nunca las subas a GitHub.
 
@@ -34,11 +37,11 @@ npm run bot:deploy-commands
 npm run bot:dev
 ```
 En Discord (como administrador):
-1. `/ia estado probar:True` → debe mostrar "✅ respondió ...".
+1. `/ia estado probar:True` → hace una prueba individual de cada proveedor e informa disponibilidad y latencia.
 2. Opcional: `/ia reglas archivo:` (sube un .txt con instrucciones complementarias) o `/ia reglas texto:`.
 3. `/ia preguntar pregunta:¿Qué pasa si hago RDM?`
 
-También puedes mencionar al bot en un canal del servidor para que responda. Las respuestas se publican en contenedores de Components V2.
+También puedes mencionar al bot en un canal del servidor para que responda. Las respuestas se publican en contenedores de Components V2. `/ia preguntar` y las menciones de conversación recuerdan hasta 8 turnos por usuario y canal, con retención máxima de 30 días. Usa `/ia olvidar` para borrar tu memoria de IA en el canal actual. Las conversaciones se almacenan en PostgreSQL; los identificadores se guardan como hashes, se omiten mensajes que parecen contener claves o contraseñas y se reemplazan menciones por marcadores antes de guardarlas.
 
 Al abrir un ticket, la IA responde primero y pide detalles. El creador puede escribir su solicitud o los datos que faltan directamente en el canal: no necesita mencionar al bot. La IA procesa esos mensajes automáticamente y deriva los casos graves a Fundación o Junta Administrativa, los reportes de roleplay y apelaciones a Moderación, y las dudas normales a Soporte. Las categorías Reporte y Apelación sirven como pista para Moderación; Soporte y Otro se derivan a Soporte si el contenido no indica otro destino. Si la IA no puede responder al abrir el ticket, este permanece abierto para recibir detalles; si falla la clasificación, se usa una ruta de respaldo basada en la categoría. Los IDs configurados por defecto son los que se indicaron para esos cuatro roles; se pueden cambiar con `ROL_FUNDACION_ID`, `ROL_JUNTA_ADMINISTRATIVA_ID`, `ROL_MODERADOR_ID` y `ROL_SOPORTE_ID`.
 El propietario del ticket o un miembro del rol asignado puede escribir `Cierra el ticket @Bot` o `elimina el ticket @Bot`. El bot pide confirmación; al confirmarla, espera 5 segundos, guarda una transcripción HTML descargable y legible en navegador en el canal `1571736144515833898` y luego elimina el canal del ticket. Si no puede guardar la transcripción, conserva el ticket. Un miembro del equipo asignado también puede escribir `Reasigna el ticket a Fundación @Bot`; el acceso se transfiere al rol de Fundación y se notifica al equipo. Cuando la IA está activa, ayuda a reconocer otras formas explícitas de pedir el cierre o la reasignación; las expresiones directas anteriores siguen funcionando aunque la IA no esté disponible.
@@ -59,14 +62,22 @@ La protección anti-raid vigila creaciones y borrados de canales y roles. Si el 
 | Comando | Quién | Qué hace |
 |---|---|---|
 | `/ia preguntar` | todos | Responde dudas usando la normativa oficial y las instrucciones complementarias |
+| `/ia olvidar` | todos | Borra la memoria de IA del usuario en el canal actual |
 | `/ia redactar` | todos | Borrador de parte policial, resolución, certificado, comunicado o informe |
 | `/ia resumir` | staff | Resume los últimos mensajes del canal (útil en tickets) |
 | `/ia reglas` | administradores | Agrega instrucciones complementarias a la normativa oficial |
-| `/ia estado` | administradores | Proveedores, uso del día y prueba de conexión |
+| `/ia estado` | administradores | Disponibilidad, modelo y latencia de proveedores; uso y pruebas individuales |
 | `/ia activar` | administradores | Enciende o apaga la IA |
 
 ## Límites y cuidado del cupo gratuito
-- El bot no impone límites diarios ni espera entre usos. Las cuotas, límites de solicitudes/tokens y posibles costos de Gemini, Groq u OpenRouter siguen aplicando. Las variables antiguas `IA_LIMITE_USUARIO_DIARIO`, `IA_LIMITE_GLOBAL_DIARIO` e `IA_COOLDOWN_SEGUNDOS` ya no tienen efecto.
+- El bot limita a 20 consultas diarias por usuario y 500 globales por proceso, según la hora de Chile, y permite hasta 4 solicitudes simultáneas (20 en espera). Los roles de staff/administración no tienen el límite individual, pero sí cuentan para el máximo global. Los contadores se reinician al reiniciar o volver a desplegar el bot; no reemplazan las cuotas de los proveedores.
+- Después de actualizar, aplica la migración aditiva de memoria y regenera el cliente Prisma antes de arrancar el bot:
+  ```bash
+  npm run deploy -w @rp-chile/db
+  npm run db:generate
+  npm run bot:deploy-commands
+  ```
+- Las pruebas simuladas se ejecutan con `npm run test -w @rp-chile/bot`; no requieren claves reales. Una prueba real de disponibilidad se puede realizar con `/ia estado probar:True`.
 - Los planes gratuitos pueden usar lo que envías para mejorar sus modelos. No cargues datos personales reales ni información privada de jugadores.
 - Los cupos y los nombres de modelos gratuitos cambian. Si `/ia estado probar:True` falla, revisa en Google AI Studio qué modelo está disponible y ponlo en `GEMINI_MODEL`.
 - El bot no decide sanciones por sí solo: solo aplica un veto cuando un miembro autorizado lo solicita explícitamente mediante una mención y una persona mencionada.

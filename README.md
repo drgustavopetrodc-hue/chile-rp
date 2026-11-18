@@ -77,7 +77,7 @@ El bot necesita un proceso siempre encendido (no sirve Vercel). Railway lo despl
    - **Build Command:** `npm run db:generate`
    - **Start Command:** `npm run bot:start`
 4. En **Variables** agrega las mismas del `.env` del bot: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_GUILD_ID`, `ROL_STAFF_ID`, `ROL_NO_VERIFICADO_ID`, `ROL_CIUDADANO_ID`, `CANAL_REVISION_ID`, `DATABASE_URL` y `DATABASE_URL_UNPOOLED`.
-5. Las migraciones de la base de datos se ejecutan desde tu computador (`npm run migrate -w @rp-chile/db -- --name <nombre>`), no desde Railway.
+5. Antes de desplegar cambios de esquema, aplica en la base de datos de producción las migraciones ya creadas (`npm run deploy -w @rp-chile/db`) y genera el cliente (`npm run db:generate`). No ejecutes `migrate dev` contra producción. Para esta actualización, la migración añade la memoria conversacional de la IA.
 6. Cada `git push` a la rama principal vuelve a desplegar el bot automáticamente.
 
 Railway cobra por uso (CPU y memoria por segundo). Revisa el consumo en el panel y configura un límite de gasto.

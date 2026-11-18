@@ -159,7 +159,7 @@ function esSolicitudReasignarAFundacion(mensaje: Message) {
   const botId = mensaje.client.user?.id
   if (!botId || !mensaje.mentions.users.has(botId) || !mencionBotAlFinal(mensaje.content, botId)) return false
   const texto = normalizarSolicitudTicket(mensaje.content)
-  return /\b(?:reasigna|reasignar|deriva|derivar|pasa|pasar|asigna|asignar)\b.*\b(?:ticket|caso)\b.*\ba\s+(?:la\s+)?fundacion\b/.test(texto)
+  return /\b(?:reasigna|reasignar|deriva|derivar|pasa|pasar|asigna|asignar|transfiere|transferir|traslada|trasladar|mueve|mover|envia|enviar|manda|mandar)\b.*\b(?:ticket|caso)\b.*\b(?:a|para|hacia)\s+(?:la\s+)?fundacion\b/.test(texto)
 }
 
 function normalizarSolicitudTicket(texto: string) {
@@ -186,6 +186,7 @@ async function clasificarSolicitudTicketConIA(mensaje: Message): Promise<'cerrar
       usuario: `<solicitud>\n${solicitud}\n</solicitud>`,
       maxTokens: 100,
       temperatura: 0,
+      usuarioId: mensaje.author.id,
     })
     const etiqueta = resultado.texto.trim().toLocaleUpperCase('es-CL').replace(/[^A-Z_]/g, '')
     if (etiqueta === 'CERRAR_TICKET') return 'cerrar'
@@ -194,7 +195,7 @@ async function clasificarSolicitudTicketConIA(mensaje: Message): Promise<'cerrar
     }
     return undefined
   } catch (error) {
-    console.error('[Ticket IA] No se pudo clasificar la solicitud:', error)
+    console.warn('[Ticket IA] No se pudo clasificar la solicitud; la IA puede estar temporalmente indisponible:', error)
     return undefined
   }
 }
@@ -869,12 +870,13 @@ async function responderAlAbrirTicket(
   usuario: User,
   respuesta: Message,
 ) {
-  const reserva = reservarUso(usuario.id, true)
+  const reserva = reservarUso(usuario.id, false)
   if (!reserva.ok) {
     await respuesta.edit('Cuéntame qué ocurrió, cuándo pasó y quiénes participaron. Mantendré el ticket abierto mientras reúno los detalles para derivarlo al equipo adecuado.')
     return
   }
 
+  let consultaCompletada = false
   try {
     if ((await leerAjusteIA<boolean>('ia.activo')) === false || !proveedoresConfigurados().length) {
       throw new IAError('La IA no está activa o no tiene proveedores configurados')
@@ -888,7 +890,10 @@ async function responderAlAbrirTicket(
       ),
       usuario: `Asunto del ticket: ${ticket.asunto}\nCategoría: ${ticket.categoria}`,
       maxTokens: 350,
+      usuarioId: usuario.id,
+      cuotaReservada: true,
     })
+    consultaCompletada = true
     await enviarComponentsV2(canal, {
       content: `<@${usuario.id}>`,
       embeds: [crearEmbed('Respuesta de IA', limpiarSalida(resultado.texto, 1700))],
@@ -896,7 +901,7 @@ async function responderAlAbrirTicket(
     })
     await respuesta.delete().catch((error) => console.warn(`[Ticket #${ticket.numero}] No se pudo retirar el aviso temporal:`, error))
   } catch (error) {
-    devolverUso(usuario.id, true)
+    if (!consultaCompletada) devolverUso(usuario.id, false)
     console.error(`[Ticket #${ticket.numero}] Falló la respuesta inicial de IA:`, error instanceof IAError ? error.message : error)
     await respuesta.edit('La IA no está disponible ahora. Cuéntame qué ocurrió, cuándo pasó y quiénes participaron; mantendré el ticket abierto para derivarlo cuando tenga los detalles.')
   }
@@ -941,6 +946,7 @@ export async function manejarMensajeTicket(mensaje: Message): Promise<boolean> {
   }
 
   clasificacionesEnCurso.add(ticket.id)
+  let consultaCompletada = false
   try {
     await respuestasInicialesTickets.get(ticket.id)
     const ticketActual = await db.ticket.findUnique({ where: { id: ticket.id }, select: { estado: true } })
@@ -955,7 +961,7 @@ export async function manejarMensajeTicket(mensaje: Message): Promise<boolean> {
       .join('\n')
       .slice(-6000)
     const consulta = `Asunto: ${ticket.asunto}\nCategoría: ${ticket.categoria}\nDetalles:\n${detalles}`
-    const reserva = reservarUso(mensaje.author.id, true)
+    const reserva = reservarUso(mensaje.author.id, false)
     if (!reserva.ok) {
       await derivarTicket(
         canal,
@@ -988,7 +994,10 @@ export async function manejarMensajeTicket(mensaje: Message): Promise<boolean> {
         usuario: `<ticket>\n${consulta}\n</ticket>`,
         maxTokens: 500,
         temperatura: 0.1,
+        usuarioId: mensaje.author.id,
+        cuotaReservada: true,
       })
+      consultaCompletada = true
       const clasificacion = parsearClasificacion(resultado.texto)
       if (!clasificacion) throw new IAError('La IA devolvió una clasificación inválida')
 
@@ -1026,7 +1035,7 @@ export async function manejarMensajeTicket(mensaje: Message): Promise<boolean> {
         clasificacion.resumen,
       )
     } catch (error) {
-      devolverUso(mensaje.author.id, true)
+      if (!consultaCompletada) devolverUso(mensaje.author.id, false)
       console.error(`[Ticket #${ticket.numero}] Falló la clasificación de IA:`, error instanceof IAError ? error.message : error)
       await derivarTicket(
         canal,
