@@ -444,7 +444,7 @@ function crearFichaProcedimiento({
   const separador = () => new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
 
   return new ContainerBuilder()
-    .setAccentColor(0xffffff)
+    .setAccentColor(coloresEmbed.principal)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${titulo}\n**Código de documento:** ${codigo}\n**ID del registro:** ${registroId}`))
     .addSeparatorComponents(separador())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(

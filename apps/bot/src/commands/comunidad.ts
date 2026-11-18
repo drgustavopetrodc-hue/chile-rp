@@ -85,6 +85,13 @@ export const ticketPanelData = new SlashCommandBuilder()
   .setDescription('Publica el panel para abrir tickets')
   .setContexts(InteractionContextType.Guild)
 
+export const ticketHistorialData = new SlashCommandBuilder()
+  .setName('ticket')
+  .setDescription('Consulta la trazabilidad de un ticket')
+  .setContexts(InteractionContextType.Guild)
+  .addSubcommand((s) => s.setName('historial').setDescription('Muestra las derivaciones y cambios de un ticket')
+    .addIntegerOption((o) => o.setName('numero').setDescription('Número del ticket').setRequired(true).setMinValue(1)))
+
 const ticketModalId = 'ticketpanel:modal'
 
 export const calificarData = new SlashCommandBuilder()
@@ -97,6 +104,7 @@ export const calificarData = new SlashCommandBuilder()
 export const comunidad = [
   { data: soporteData, execute: ejecutarSoporte },
   { data: ticketPanelData, execute: ejecutarTicketPanel },
+  { data: ticketHistorialData, execute: ejecutarTicketHistorial },
   { data: solicitarRolData, execute: ejecutarSolicitud },
   { data: calificarData, execute: ejecutarCalificacion },
 ]
@@ -216,6 +224,65 @@ function rolesAsignadosTicket(canal: TextChannel) {
 
 function tieneAccesoDeEquipoAsignado(canal: TextChannel, miembro: GuildMember) {
   return rolesAsignadosTicket(canal).some((id) => miembro.roles.cache.has(id))
+}
+
+async function ejecutarTicketHistorial(i: ChatInputCommandInteraction) {
+  if (!i.inCachedGuild()) return i.reply({ content: 'Usa este comando dentro del servidor.', flags: efimero })
+  await i.deferReply({ flags: efimero })
+  const numero = i.options.getInteger('numero', true)
+  const ticket = await db.ticket.findUnique({
+    where: { numero },
+    include: {
+      usuario: { select: { discordId: true } },
+      actuaciones: { orderBy: { creadaEn: 'desc' }, take: 20 },
+    },
+  })
+  if (!ticket) return i.editReply({ content: 'No se encontró ese ticket.' })
+
+  const rolEquipo = ticket.equipoAsignado
+    ? {
+      FUNDACION: config.roles.fundacion,
+      JUNTA_ADMINISTRATIVA: config.roles.juntaAdministrativa,
+      MODERACION: config.roles.moderador,
+      SOPORTE: config.roles.soporte,
+    }[ticket.equipoAsignado]
+    : undefined
+  const esPropietario = ticket.usuario.discordId === i.user.id
+  const esAdministrador = i.memberPermissions.has(PermissionFlagsBits.Administrator) ||
+    (!!config.roles.admin && i.member.roles.cache.has(config.roles.admin))
+  let accesoEquipo = !!rolEquipo && i.member.roles.cache.has(rolEquipo)
+  if (!esPropietario && !esAdministrador && !accesoEquipo && !ticket.equipoAsignado && ticket.canalDiscordId) {
+    const canal = await i.guild.channels.fetch(ticket.canalDiscordId)
+    if (canal?.type === ChannelType.GuildText) accesoEquipo = tieneAccesoDeEquipoAsignado(canal, i.member)
+  }
+  if (!esPropietario && !accesoEquipo && !esAdministrador) {
+    return i.editReply({ content: 'No tienes autorización para consultar el historial de este ticket.' })
+  }
+
+  const etiquetas: Record<string, string> = {
+    APERTURA: 'Apertura',
+    DERIVACION: 'Derivación',
+    REASIGNACION: 'Reasignación',
+    CIERRE: 'Cierre',
+  }
+  const actuaciones = [...ticket.actuaciones].reverse().map((actuacion) => {
+    const equipo = actuacion.equipoNuevo
+      ? ` · equipo ${actuacion.equipoNuevo.replaceAll('_', ' ')}`
+      : ''
+    const detalle = actuacion.detalle
+      ? ` · ${actuacion.detalle.replace(/@(everyone|here)/gi, '@\u200b$1').replace(/<@!?(\d+)>|<@&\d+>|<#\d+>/g, '[mención]').slice(0, 250)}`
+      : ''
+    return `• ${actuacion.creadaEn.toLocaleString('es-CL', { timeZone: 'America/Santiago' })} · ${etiquetas[actuacion.tipo] ?? actuacion.tipo}${equipo}${detalle}`
+  })
+  return i.editReply({
+    content: [
+      `## Historial del ticket #${ticket.numero}`,
+      `**Asunto:** ${ticket.asunto.replace(/@(everyone|here)/gi, '@\u200b$1').slice(0, 150)}`,
+      `**Estado:** ${ticket.estado} · **Prioridad:** ${ticket.prioridad} · **Equipo actual:** ${ticket.equipoAsignado?.replaceAll('_', ' ') ?? 'Pendiente'}`,
+      `**Actuaciones:**\n${actuaciones.length ? actuaciones.join('\n') : 'Sin actuaciones registradas.'}`,
+    ].join('\n\n'),
+    allowedMentions: { parse: [] },
+  })
 }
 
 function puedeEliminarTicket(
@@ -345,7 +412,7 @@ h2{margin:28px 4px 12px;font-size:1.15rem}.message{margin:12px 0;padding:18px;bo
 .message-header{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;color:#b9c0cc;font-size:.82rem}.message-header strong{color:#f2f4f8;font-size:.95rem}
 .user-id{font-family:ui-monospace,monospace;color:#7e8797}.message-header time{margin-left:auto;color:#929aaa}
 .message-body{margin-top:12px;line-height:1.6;overflow-wrap:anywhere}.message-content{white-space:pre-wrap;overflow-wrap:anywhere}.component-text{margin-top:8px}
-.embed{margin-top:10px;padding:12px;border-left:3px solid #7186ff;border-radius:4px;background:#222631}.embed h3{margin:0 0 6px;font-size:1rem}.embed p{margin:6px 0;white-space:pre-wrap}.embed-field{margin:9px 0}.embed-field p{margin:3px 0}.embed small{color:#aab1bf}
+.embed{margin-top:10px;padding:12px;border-left:3px solid #174a5b;border-radius:4px;background:#222631}.embed h3{margin:0 0 6px;font-size:1rem}.embed p{margin:6px 0;white-space:pre-wrap}.embed-field{margin:9px 0}.embed-field p{margin:3px 0}.embed small{color:#aab1bf}
 a{color:#8ab4f8;text-decoration:none}a:hover{text-decoration:underline}.attachments{padding-left:20px}.attachments li{margin:5px 0}.attachments span{color:#8f98a8}
 .empty{color:#929aaa;font-style:italic}footer{margin:24px 4px;color:#808898;font-size:.8rem}
 @media(max-width:600px){body{padding:16px 10px}.ticket-header{padding:20px}.message{padding:14px}.message-header time{width:100%;margin-left:0}}
@@ -616,9 +683,29 @@ async function manejarConfirmacionCierreTicket(i: ButtonInteraction) {
     const transcripcion = partesTranscripcion.length === 1
       ? partesTranscripcion[0]!
       : JSON.stringify(partesTranscripcion)
-    await db.ticket.update({
-      where: { id: ticketActual.id },
-      data: { estado: 'CERRADO', cerradoEn: new Date(), transcripcion },
+    await db.$transaction(async (tx) => {
+      const cerrado = await tx.ticket.updateMany({
+        where: { id: ticketActual.id, estado: { not: 'CERRADO' } },
+        data: {
+          estado: 'CERRADO',
+          cerradoEn: new Date(),
+          cerradoPorDiscordId: i.user.id,
+          transcripcion,
+        },
+      })
+      if (!cerrado.count) throw new Error('El ticket ya estaba cerrado.')
+      await tx.ticketActuacion.create({
+        data: {
+          ticketId: ticketActual.id,
+          actorDiscordId: i.user.id,
+          tipo: 'CIERRE',
+          equipoAnterior: ticketActual.equipoAsignado,
+          equipoNuevo: ticketActual.equipoAsignado,
+          prioridadAnterior: ticketActual.prioridad,
+          prioridadNueva: ticketActual.prioridad,
+          detalle: 'Cierre registrado después de archivar la transcripción.',
+        },
+      })
     })
     await canalActual.delete(`Ticket #${ticketActual.numero} eliminado por ${i.user.tag}`)
   } catch (error) {
@@ -664,7 +751,7 @@ async function restaurarPermisosAccesoTicket(
 
 async function reasignarTicketAFundacion(
   canal: TextChannel,
-  ticket: { id: string; numero: number; estado: string },
+  ticket: { id: string; numero: number; estado: string; equipoAsignado: EquipoTicket | null; prioridad: GravedadTicket },
   miembro: GuildMember,
 ) {
   if (ticket.estado !== 'EN_ATENCION') {
@@ -676,6 +763,8 @@ async function reasignarTicketAFundacion(
     throw new Error('No pude identificar un único equipo asignado en este ticket.')
   }
   const rolActualId = rolesActuales[0]!
+  const equipoAnterior = ticket.equipoAsignado ?? equipoPorRolId(rolActualId)
+  if (!equipoAnterior) throw new Error('No pude identificar el equipo asignado a este ticket.')
   if (!miembro.roles.cache.has(rolActualId)) {
     throw new Error('Solo una persona con el rol del equipo actualmente asignado puede reasignar el ticket.')
   }
@@ -711,11 +800,25 @@ async function reasignarTicketAFundacion(
       ReadMessageHistory: false,
     }, { reason: motivo })
     equipoAnteriorActualizado = true
-    const sigueActivo = await db.ticket.updateMany({
-      where: { id: ticket.id, estado: 'EN_ATENCION' },
-      data: { estado: 'EN_ATENCION' },
+    await db.$transaction(async (tx) => {
+      const sigueActivo = await tx.ticket.updateMany({
+        where: { id: ticket.id, estado: 'EN_ATENCION' },
+        data: { equipoAsignado: 'FUNDACION', asignadoEn: new Date() },
+      })
+      if (!sigueActivo.count) throw new Error('El ticket dejó de estar activo durante la reasignación.')
+      await tx.ticketActuacion.create({
+        data: {
+          ticketId: ticket.id,
+          actorDiscordId: miembro.id,
+          tipo: 'REASIGNACION',
+          equipoAnterior,
+          equipoNuevo: 'FUNDACION',
+          prioridadAnterior: ticket.prioridad,
+          prioridadNueva: ticket.prioridad,
+          detalle: 'Reasignación a Fundación.',
+        },
+      })
     })
-    if (!sigueActivo.count) throw new Error('El ticket dejó de estar activo durante la reasignación.')
   } catch (error) {
     const motivoRollback = `Reversión de reasignación incompleta del ticket #${ticket.numero}`
     if (equipoAnteriorActualizado) {
@@ -731,9 +834,19 @@ async function reasignarTicketAFundacion(
   return rolFundacion.id
 }
 
+function equipoPorRolId(rolId: string): EquipoTicket | undefined {
+  const equipos: [EquipoTicket, string | undefined][] = [
+    ['FUNDACION', config.roles.fundacion],
+    ['JUNTA_ADMINISTRATIVA', config.roles.juntaAdministrativa],
+    ['MODERACION', config.roles.moderador],
+    ['SOPORTE', config.roles.soporte],
+  ]
+  return equipos.find(([, id]) => id === rolId)?.[0]
+}
+
 async function manejarSolicitudReasignacionFundacion(
   mensaje: Message,
-  ticket: { id: string; numero: number; estado: string },
+  ticket: { id: string; numero: number; estado: string; equipoAsignado: EquipoTicket | null; prioridad: GravedadTicket },
 ) {
   const canal = mensaje.channel as TextChannel
   const miembro = mensaje.member ?? await mensaje.guild!.members.fetch(mensaje.author.id)
@@ -821,7 +934,20 @@ async function crearTicket(guild: Guild, usuarioDiscord: User, asunto: string, c
     ],
   })
   try {
-    const ticket = await db.ticket.create({ data: { usuarioId: usuario.id, asunto, categoria, canalDiscordId: canal.id } })
+    const ticket = await db.$transaction(async (tx) => {
+      const creado = await tx.ticket.create({
+        data: { usuarioId: usuario.id, asunto, categoria, canalDiscordId: canal.id },
+      })
+      await tx.ticketActuacion.create({
+        data: {
+          ticketId: creado.id,
+          actorDiscordId: usuarioDiscord.id,
+          tipo: 'APERTURA',
+          detalle: `Ticket abierto como ${categoria}.`,
+        },
+      })
+      return creado
+    })
     const respuestaInicial = await canal.send({
       content: `<@${usuarioDiscord.id}> La IA está revisando tu solicitud para orientarte y derivarla al equipo adecuado.`,
       allowedMentions: { users: [usuarioDiscord.id] },
@@ -1118,16 +1244,57 @@ async function derivarTicket(
     throw new Error('El rol de Soporte no existe en el servidor')
   }
 
-  await canal.permissionOverwrites.edit(roleId, {
-    ViewChannel: true,
-    SendMessages: true,
-    ReadMessageHistory: true,
-  })
-  const actualizado = await db.ticket.updateMany({
-    where: { id: ticket.id, estado: 'ABIERTO' },
-    data: { estado: 'EN_ATENCION' },
-  })
-  if (!actualizado.count) return
+  const permisosAnteriores = leerPermisosAccesoTicket(canal, roleId)
+  let actualizado = false
+  try {
+    await canal.permissionOverwrites.edit(roleId, {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true,
+    })
+    actualizado = await db.$transaction(async (tx) => {
+      const cambio = await tx.ticket.updateMany({
+        where: { id: ticket.id, estado: 'ABIERTO' },
+        data: {
+          estado: 'EN_ATENCION',
+          equipoAsignado: destinoFinal,
+          prioridad: gravedad,
+          resumen: limpiarSalida(resumen, 500),
+          asignadoEn: new Date(),
+        },
+      })
+      if (!cambio.count) return false
+      await tx.ticketActuacion.create({
+        data: {
+          ticketId: ticket.id,
+          actorDiscordId: canal.client.user?.id ?? usuarioId,
+          tipo: 'DERIVACION',
+          equipoNuevo: destinoFinal,
+          prioridadAnterior: 'MEDIA',
+          prioridadNueva: gravedad,
+          detalle: limpiarSalida(resumen, 500),
+        },
+      })
+      return true
+    })
+  } catch (error) {
+    await restaurarPermisosAccesoTicket(
+      canal,
+      roleId,
+      permisosAnteriores,
+      `Reversión de derivación incompleta del ticket #${ticket.numero}`,
+    ).catch((rollbackError) => console.error(`[Ticket #${ticket.numero}] No se restauró el acceso tras fallar la derivación:`, rollbackError))
+    throw error
+  }
+  if (!actualizado) {
+    await restaurarPermisosAccesoTicket(
+      canal,
+      roleId,
+      permisosAnteriores,
+      `Reversión de derivación obsoleta del ticket #${ticket.numero}`,
+    )
+    return
+  }
   intentosClasificacion.delete(ticket.id)
   await enviarComponentsV2(canal, {
     content: `<@${usuarioId}> <@&${roleId}>`,

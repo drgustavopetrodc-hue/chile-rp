@@ -17,7 +17,7 @@ export function comoComponentsV2(payload: string | Payload, incluirFlags = true)
   const flags = numeroFlags(original.flags)
   if ((flags & MessageFlags.IsComponentsV2) !== 0 && Array.isArray(original.components)) return original
 
-  const container = new ContainerBuilder().setAccentColor(0xffffff)
+  const container = new ContainerBuilder().setAccentColor(coloresEmbed.principal)
   let tieneContenido = false
   const agregarTexto = (texto: string) => {
     for (const parte of dividirTexto(texto)) {

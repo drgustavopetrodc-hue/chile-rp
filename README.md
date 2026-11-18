@@ -18,7 +18,7 @@ La web (Next.js) irá en `apps/web` y usará el mismo paquete `@rp-chile/db`.
 
 ## Requisitos
 
-- Node.js 20.19 o superior
+- Node.js 22 o superior
 - Una base de datos en [Neon](https://neon.tech) (necesitas la cadena *pooled* y la *direct*)
 - Una aplicación de bot creada en el Discord Developer Portal
 
@@ -57,14 +57,23 @@ La web (Next.js) irá en `apps/web` y usará el mismo paquete `@rp-chile/db`.
 - [x] Esquema de base de datos
 - [x] Verificación y whitelist de nuevos miembros
 - [x] `/cedula`
-- [ ] Tickets de soporte y postulaciones a instituciones
-- [ ] Registro de casos, multas y antecedentes
+- [x] Tickets de soporte con derivación, reasignación y transcripción
+- [x] Expedientes administrativos, actuaciones y resoluciones persistentes
+- [x] Postulaciones a instituciones
+- [x] Registro de casos, multas y antecedentes
 - [ ] Banco
 - [ ] Página web (login con Discord, portal ciudadano, portales institucionales)
 
 ## Seguridad
 
 Nunca subas archivos `.env` ni el token del bot a GitHub. El `.gitignore` ya los excluye. Si el token se filtra, regéneralo en el Developer Portal.
+
+## Tickets y expedientes administrativos
+
+- `/soporte` y el panel `/ticket-panel` conservan el flujo de tickets. Las derivaciones, reasignaciones y cierres se guardan en el historial del ticket, consultable con `/ticket historial`; el cierre sigue archivando primero la transcripción.
+- `/expediente crear` recibe una solicitud y genera un folio `ADM-año-secuencia`. El solicitante puede consultar su expediente con `/expediente ver`.
+- Un administrador debe configurar las competencias con `/expediente autoridad`, asignando un rol por tipo de solicitud y, opcionalmente, por institución. No se asignan competencias institucionales por defecto. Los roles configurados pueden revisar `/expediente pendientes`, agregar `/expediente nota`, cambiar `/expediente estado` y registrar `/expediente resolver`.
+- `/expediente orientar` genera una orientación no vinculante; requiere aceptar explícitamente el envío del texto al proveedor de IA. No modifica el expediente ni reemplaza la decisión de la autoridad humana.
 
 ## Despliegue del bot en Railway
 
@@ -77,7 +86,7 @@ El bot necesita un proceso siempre encendido (no sirve Vercel). Railway lo despl
    - **Build Command:** `npm run db:generate`
    - **Start Command:** `npm run bot:start`
 4. En **Variables** agrega las mismas del `.env` del bot: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_GUILD_ID`, `ROL_STAFF_ID`, `ROL_NO_VERIFICADO_ID`, `ROL_CIUDADANO_ID`, `CANAL_REVISION_ID`, `DATABASE_URL` y `DATABASE_URL_UNPOOLED`.
-5. Antes de desplegar cambios de esquema, aplica en la base de datos de producción las migraciones ya creadas (`npm run deploy -w @rp-chile/db`) y genera el cliente (`npm run db:generate`). No ejecutes `migrate dev` contra producción. Para esta actualización, la migración añade la memoria conversacional de la IA.
+5. Antes de desplegar cambios de esquema, respalda la base de datos y coordina la aprobación de la migración. Solo después de autorizarla, aplica las migraciones (`npm run deploy -w @rp-chile/db`) y genera el cliente (`npm run db:generate`). No ejecutes `migrate dev` contra producción. Las migraciones pendientes añaden memoria IA, expedientes y actuaciones administrativas, y el historial de tickets.
 6. Cada `git push` a la rama principal vuelve a desplegar el bot automáticamente.
 
 Railway cobra por uso (CPU y memoria por segundo). Revisa el consumo en el panel y configura un límite de gasto.

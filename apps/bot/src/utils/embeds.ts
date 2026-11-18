@@ -1,11 +1,11 @@
 import { EmbedBuilder } from 'discord.js'
 
 export const coloresEmbed = {
-  principal: 0x176b63,
-  exito: 0x25845a,
-  aviso: 0xc28b2c,
-  error: 0xb84d4d,
-  neutro: 0x53636a,
+  principal: 0x174a5b,
+  exito: 0x2f795d,
+  aviso: 0xa77624,
+  error: 0xa6454b,
+  neutro: 0x5d6a70,
 } as const
 
 export function crearEmbed(titulo: string, descripcion?: string, color: number = coloresEmbed.principal) {

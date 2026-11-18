@@ -11,6 +11,7 @@ import {
 } from 'discord.js'
 import { db } from '@rp-chile/db'
 import { asegurarUsuario } from '../utils/usuarios'
+import { coloresEmbed } from '../utils/embeds'
 import { comoComponentsV2 } from '../utils/components-v2'
 import { config } from '../config'
 
@@ -150,7 +151,7 @@ async function publicarCasoModeracion(
     if (!canal?.isTextBased() || !('threads' in canal) || !canal.isSendable()) return null
     const fecha = new Intl.DateTimeFormat('es-CL', { dateStyle: 'long', timeStyle: 'short', timeZone: 'America/Santiago' }).format(new Date())
     const container = new ContainerBuilder()
-      .setAccentColor(0xffffff)
+      .setAccentColor(coloresEmbed.principal)
       .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${tipo} emitida`))
       .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large))
       .addTextDisplayComponents(new TextDisplayBuilder().setContent(
@@ -175,7 +176,7 @@ async function publicarCasoModeracion(
       reason: `Evidencia del registro de ${tipo.toLowerCase()} ${registroId}`,
     })
     await hilo.send(comoComponentsV2({
-      components: [new ContainerBuilder().setAccentColor(0xffffff).addTextDisplayComponents(
+      components: [new ContainerBuilder().setAccentColor(coloresEmbed.principal).addTextDisplayComponents(
         new TextDisplayBuilder().setContent(`## Evidencia del registro #${registroId.slice(-6)}\nAdjunta aquí capturas o antecedentes relacionados con esta ${tipo.toLowerCase()}.`),
       )],
       flags: MessageFlags.IsComponentsV2,

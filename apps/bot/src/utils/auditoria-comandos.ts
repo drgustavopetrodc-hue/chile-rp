@@ -7,6 +7,7 @@ import {
   TextDisplayBuilder,
 } from 'discord.js'
 import { config } from '../config'
+import { coloresEmbed } from './embeds'
 import { comoComponentsV2 } from './components-v2'
 
 const comandosSiempre = new Set([
@@ -58,7 +59,7 @@ export async function registrarComandoPrivilegiado(
     ...(errorSeguro ? [`**Error:** ${errorSeguro}`] : []),
   ]
   const container = new ContainerBuilder()
-    .setAccentColor(0xffffff)
+    .setAccentColor(coloresEmbed.principal)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(lineas.join('\n')))
     .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
     .addTextDisplayComponents(new TextDisplayBuilder().setContent('-# Registro interno de moderación y administración'))

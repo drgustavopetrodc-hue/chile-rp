@@ -119,6 +119,60 @@ enum EstadoTicket {
   CERRADO
 }
 
+enum PrioridadTicket {
+  BAJA
+  MEDIA
+  ALTA
+  CRITICA
+}
+
+enum EquipoTicket {
+  FUNDACION
+  JUNTA_ADMINISTRATIVA
+  MODERACION
+  SOPORTE
+}
+
+enum TipoActuacionTicket {
+  APERTURA
+  DERIVACION
+  REASIGNACION
+  CIERRE
+}
+
+enum TipoExpedienteAdministrativo {
+  PETICION
+  RECLAMO
+  RECURSO
+  DENUNCIA
+  CONSULTA
+  OTRO
+}
+
+enum EstadoExpedienteAdministrativo {
+  RECIBIDO
+  EN_REVISION
+  EN_TRAMITACION
+  RESUELTO
+  ARCHIVADO
+}
+
+enum TipoActuacionAdministrativa {
+  RECEPCION
+  NOTA
+  CAMBIO_ESTADO
+  REAPERTURA
+  RESOLUCION
+  ARCHIVO
+}
+
+enum ResultadoResolucionAdministrativa {
+  ACOGIDA
+  PARCIAL
+  RECHAZADA
+  INADMISIBLE
+}
+
 enum TipoPostulacion {
   WHITELIST
   INSTITUCION
@@ -155,6 +209,7 @@ model Usuario {
   postulaciones          Postulacion[] @relation("PostulacionesEnviadas")
   postulacionesRevisadas Postulacion[] @relation("PostulacionesRevisadas")
   casosCreados           Caso[]
+  expedientesSolicitados ExpedienteAdministrativo[] @relation("ExpedientesSolicitados")
   auditorias             Auditoria[]
 
   @@map("usuarios")
@@ -291,6 +346,8 @@ model Institucion {
   cargos        Cargo[]
   casos         Caso[]
   postulaciones Postulacion[]
+  expedientes   ExpedienteAdministrativo[]
+  autoridades   AutoridadAdministrativa[]
 
   @@map("instituciones")
 }
@@ -444,6 +501,10 @@ model Ticket {
   categoria      CategoriaTicket @default(SOPORTE)
   asunto         String
   estado         EstadoTicket    @default(ABIERTO)
+  prioridad      PrioridadTicket @default(MEDIA)
+  equipoAsignado EquipoTicket?
+  resumen        String?         @db.Text
+  asignadoEn     DateTime?
   canalDiscordId String?         @unique
   usuarioId      String
   usuario        Usuario         @relation("TicketsCreados", fields: [usuarioId], references: [id])
@@ -452,9 +513,104 @@ model Ticket {
   transcripcion  String?         @db.Text
   creadoEn       DateTime        @default(now())
   cerradoEn      DateTime?
+  cerradoPorDiscordId String?
+  actuaciones    TicketActuacion[]
 
   @@index([estado])
+  @@index([equipoAsignado, estado])
   @@map("tickets")
+}
+
+model TicketActuacion {
+  id                 String               @id @default(cuid())
+  ticketId           String
+  ticket             Ticket               @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  actorDiscordId     String
+  tipo               TipoActuacionTicket
+  equipoAnterior     EquipoTicket?
+  equipoNuevo        EquipoTicket?
+  prioridadAnterior  PrioridadTicket?
+  prioridadNueva     PrioridadTicket?
+  detalle            String?              @db.Text
+  creadaEn           DateTime             @default(now())
+
+  @@index([ticketId, creadaEn])
+  @@map("actuaciones_ticket")
+}
+
+model SecuenciaExpedienteAdministrativo {
+  anio      Int @id
+  siguiente Int @default(0)
+
+  @@map("secuencias_expediente_administrativo")
+}
+
+model ExpedienteAdministrativo {
+  id             String                          @id @default(cuid())
+  folio          String                          @unique
+  guildId        String
+  solicitanteId  String
+  solicitante    Usuario                         @relation("ExpedientesSolicitados", fields: [solicitanteId], references: [id])
+  tipo           TipoExpedienteAdministrativo
+  institucionId  String?
+  institucion    Institucion?                    @relation(fields: [institucionId], references: [id], onDelete: SetNull)
+  asunto         String
+  descripcion    String                          @db.Text
+  estado         EstadoExpedienteAdministrativo  @default(RECIBIDO)
+  creadoEn       DateTime                        @default(now())
+  actualizadoEn  DateTime                        @updatedAt
+  resueltoEn     DateTime?
+  actuaciones    ActuacionAdministrativa[]
+  resoluciones   ResolucionAdministrativa[]
+
+  @@index([guildId, estado, creadoEn])
+  @@index([solicitanteId, creadoEn])
+  @@index([tipo, institucionId, estado])
+  @@map("expedientes_administrativos")
+}
+
+model ActuacionAdministrativa {
+  id            String                          @id @default(cuid())
+  expedienteId  String
+  expediente    ExpedienteAdministrativo        @relation(fields: [expedienteId], references: [id], onDelete: Cascade)
+  actorDiscordId String
+  tipo          TipoActuacionAdministrativa
+  estadoAnterior EstadoExpedienteAdministrativo?
+  estadoNuevo   EstadoExpedienteAdministrativo?
+  contenido     String                          @db.Text
+  creadaEn      DateTime                        @default(now())
+
+  @@index([expedienteId, creadaEn])
+  @@map("actuaciones_administrativas")
+}
+
+model ResolucionAdministrativa {
+  id            String                            @id @default(cuid())
+  expedienteId  String
+  expediente    ExpedienteAdministrativo          @relation(fields: [expedienteId], references: [id], onDelete: Cascade)
+  actorDiscordId String
+  resultado     ResultadoResolucionAdministrativa
+  decision      String                            @db.Text
+  fundamento    String?                           @db.Text
+  creadaEn      DateTime                          @default(now())
+
+  @@index([expedienteId, creadaEn])
+  @@map("resoluciones_administrativas")
+}
+
+model AutoridadAdministrativa {
+  id            String                         @id @default(cuid())
+  guildId       String
+  tipo          TipoExpedienteAdministrativo
+  alcance       String
+  institucionId String?
+  institucion   Institucion?                   @relation(fields: [institucionId], references: [id], onDelete: SetNull)
+  rolDiscordId  String
+  actualizadoEn DateTime                       @updatedAt
+
+  @@unique([guildId, tipo, alcance])
+  @@index([guildId, rolDiscordId])
+  @@map("autoridades_administrativas")
 }
 
 model Postulacion {
