@@ -10,6 +10,7 @@ import { db } from '@rp-chile/db'
 import { config } from '../config'
 import { crearEmbed } from '../utils/embeds'
 import { comoComponentsV2 } from '../utils/components-v2'
+import { mencionBotAlFinal } from '../utils/mencion-bot'
 import { manejarSolicitudAdministrativa } from './ia-administracion'
 import {
   devolverUso,
@@ -299,7 +300,14 @@ export async function manejarMencionIA(mensaje: Message) {
   const bot = mensaje.client.user
   if (mensaje.author.bot || !mensaje.guild || !bot || !mensaje.mentions.has(bot)) return
   const pregunta = mensaje.content.replace(new RegExp(`<@!?${bot.id}>`, 'g'), '').trim()
-  if (await manejarSolicitudAdministrativa(mensaje, pregunta, bot.id)) return
+  if (mencionBotAlFinal(mensaje.content, bot.id)) {
+    if (await manejarSolicitudAdministrativa(mensaje, pregunta, bot.id)) return
+    await mensaje.reply({
+      content: 'No reconocí esa acción. Revisa las instrucciones o formula una acción administrativa compatible.',
+      allowedMentions: { repliedUser: false },
+    })
+    return
+  }
   if ((await leerAjusteIA<boolean>('ia.activo')) === false) {
     await mensaje.reply({ content: 'La IA está desactivada por el momento.', allowedMentions: { repliedUser: false } })
     return

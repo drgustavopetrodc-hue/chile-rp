@@ -23,6 +23,7 @@ import { config } from '../config'
 import { asegurarUsuario } from '../utils/usuarios'
 import { crearEmbed } from '../utils/embeds'
 import { comoComponentsV2, enviarComponentsV2 } from '../utils/components-v2'
+import { mencionBotAlFinal } from '../utils/mencion-bot'
 import { crearSistemaIA, leerAjusteIA } from './ia'
 import {
   devolverUso,
@@ -149,14 +150,14 @@ function limpiarConfirmacionesCierreTicket() {
 
 function esSolicitudEliminarTicket(mensaje: Message) {
   const botId = mensaje.client.user?.id
-  if (!botId || !mensaje.mentions.users.has(botId)) return false
+  if (!botId || !mensaje.mentions.users.has(botId) || !mencionBotAlFinal(mensaje.content, botId)) return false
   const texto = mensaje.content.replace(/<@!?\d+>/g, ' ').toLocaleLowerCase('es-CL')
   return /\b(?:elimina|eliminar|borra|borrar)\b.*\b(?:ticket|canal)\b/.test(texto)
 }
 
 function esSolicitudReasignarAFundacion(mensaje: Message) {
   const botId = mensaje.client.user?.id
-  if (!botId || !mensaje.mentions.users.has(botId)) return false
+  if (!botId || !mensaje.mentions.users.has(botId) || !mencionBotAlFinal(mensaje.content, botId)) return false
   const texto = mensaje.content
     .replace(/<@!?\d+>/g, ' ')
     .toLocaleLowerCase('es-CL')
@@ -885,6 +886,7 @@ export async function manejarMensajeTicket(mensaje: Message): Promise<boolean> {
     await manejarSolicitudCierreTicket(mensaje, ticket)
     return true
   }
+  if (mensaje.client.user && mensaje.mentions.has(mensaje.client.user)) return false
   if (ticket.estado === 'CERRADO') return true
   if (ticket.estado !== 'ABIERTO') return false
   if (ticket.usuario.discordId !== mensaje.author.id) return true

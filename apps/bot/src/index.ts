@@ -30,11 +30,12 @@ client.once(Events.ClientReady, async (c) => {
 })
 
 client.on(Events.MessageCreate, (mensaje) => {
-  void manejarAutoReaccion(mensaje)
   if (mensaje.author.bot) return
+  if (mensaje.mentions.everyone && /@everyone\b/i.test(mensaje.content)) return
+  void manejarAutoReaccion(mensaje)
   void (async () => {
     if (await manejarMensajeTicket(mensaje)) return
-    if (!client.user || !mensaje.mentions.has(client.user)) return
+    if (!client.user || !mensaje.mentions.users.has(client.user.id)) return
     if (!await usuarioPuedeUsarComando('ia', mensaje.author.id)) {
       await mensaje.reply({
         content: 'Debes completar la verificación antes de usar este comando.',
