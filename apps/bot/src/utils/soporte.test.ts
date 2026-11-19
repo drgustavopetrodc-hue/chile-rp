@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { PermissionFlagsBits } from 'discord.js'
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ContainerBuilder,
+  MessageFlags,
+  PermissionFlagsBits,
+} from 'discord.js'
+import { comoComponentsV2 } from './components-v2'
 import {
   crearPermisosCanalSoporte,
   normalizarSufijoCanalSoporte,
@@ -85,10 +93,20 @@ test('consolida identidades repetidas y conserva roles y ejecutor', () => {
 
 test('incluye al moderador responsable al mover usuarios y elimina duplicados', () => {
   assert.deepEqual(obtenerIdsUsuariosParaMover({
-    reportantes: { usuarios: ['reportante', 'moderador'] },
-    reportados: { usuarios: ['reportado'] },
-    testigos: { usuarios: ['testigo'] },
-  }, 'moderador'), ['reportante', 'moderador', 'reportado', 'testigo'])
+    reportantes: { usuarios: ['100000000000000001', '400000000000000001'] },
+    reportados: { usuarios: ['200000000000000001'] },
+    testigos: { usuarios: ['300000000000000001'] },
+  }, '400000000000000001'), [
+    '100000000000000001',
+    '400000000000000001',
+    '200000000000000001',
+    '300000000000000001',
+  ])
+  assert.throws(() => obtenerIdsUsuariosParaMover({
+    reportantes: { usuarios: [] },
+    reportados: { usuarios: [] },
+    testigos: { usuarios: [] },
+  }, 'cmwh5kfan0000covjisvlxqwj'), /ID de Discord/)
 })
 
 test('solo permite eliminar canales tras registrar el retiro, cierre y logs de la grabación', () => {
@@ -121,6 +139,22 @@ test('solo permite eliminar canales tras registrar el retiro, cierre y logs de l
     [],
     false,
   ), true)
+})
+
+test('convierte registros de soporte con archivos y botones en un container Components V2', () => {
+  const payload = comoComponentsV2({
+    content: 'Grabación finalizada.',
+    files: [{ name: 'soporte-mezcla.ogg' }],
+    components: [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId('soporte:acceder').setLabel('Acceder').setStyle(ButtonStyle.Primary),
+      ),
+    ],
+  })
+
+  assert.ok((payload.flags & MessageFlags.IsComponentsV2) !== 0)
+  assert.ok(payload.components[0] instanceof ContainerBuilder)
+  assert.equal(payload.components[0].toJSON().components.length, 3)
 })
 
 test('solo permite iniciar el soporte a staff, moderación, administración o administradores Discord', () => {

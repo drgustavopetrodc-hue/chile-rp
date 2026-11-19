@@ -27,6 +27,7 @@ import {
 import { db, Prisma } from '@rp-chile/db'
 import { config } from '../config'
 import { coloresEmbed, crearEmbed } from '../utils/embeds'
+import { comoComponentsV2 } from '../utils/components-v2'
 import { asegurarUsuario } from '../utils/usuarios'
 import {
   normalizarSufijoCanalSoporte,
@@ -843,7 +844,7 @@ async function crearSoporte(
 
   const bot = preparacion.bot
   const miembrosParticipantes = preparacion.miembrosParticipantes
-  const usuariosIndividuales = obtenerIdsUsuariosParaMover(participantes, actor.id)
+  const usuariosIndividuales = obtenerIdsUsuariosParaMover(participantes, ejecutor.id)
   for (const usuarioId of usuariosIndividuales) {
     const miembro = miembrosParticipantes.get(usuarioId)
     if (!miembro || !miembro.voice.channel) {
@@ -1855,7 +1856,10 @@ async function publicarEventoSoporteEnLogs(
     try {
       const canal = await obtenerCanalLogSeguro(guild, canalId, false)
       if (!canal) return undefined
-      await canal.send({ content: contenido, allowedMentions: { parse: [] } })
+      await canal.send(comoComponentsV2({
+        content: contenido,
+        allowedMentions: { parse: [] },
+      }))
       return canalId
     } catch (error) {
       console.error(`[Soporte ${registro.id}] No se pudo registrar ${evento} en el canal de logs ${canalId}:`, error)
@@ -1935,7 +1939,7 @@ async function publicarGrabacionEnLogs(
       continue
     }
     try {
-      const mensajeMezcla = await canal.send({
+      const mensajeMezcla = await canal.send(comoComponentsV2({
         content: `Grabación finalizada del soporte \`${registro.id}\`. Vence: ${registro.grabacionVenceEn ? fechaHoraSoporte(registro.grabacionVenceEn) : 'sin fecha'}.`,
         files: [
           new AttachmentBuilder(mezclaPath, { name: `soporte-${registro.id}-mezcla.ogg` }),
@@ -1953,18 +1957,18 @@ async function publicarGrabacionEnLogs(
           ),
         ],
         allowedMentions: { parse: [] },
-      })
+      }))
       const referenciaMezcla = { canalId, mensajeId: mensajeMezcla.id }
       mensajes.push(referenciaMezcla)
       await alPublicar(referenciaMezcla)
       if (pistas.length) {
-        const mensajePistas = await canal.send({
+        const mensajePistas = await canal.send(comoComponentsV2({
           content: `Pistas individuales del soporte \`${registro.id}\` (IDs de Discord).`,
           files: pistas.map(({ discordId, path }) =>
             new AttachmentBuilder(path, { name: `soporte-${registro.id}-participante-${discordId}.ogg` }),
           ),
           allowedMentions: { parse: [] },
-        })
+        }))
         const referenciaPistas = { canalId, mensajeId: mensajePistas.id }
         mensajes.push(referenciaPistas)
         await alPublicar(referenciaPistas)

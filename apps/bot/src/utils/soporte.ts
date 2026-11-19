@@ -98,6 +98,9 @@ export function obtenerIdsUsuariosParaMover(
   participantes: ParticipantesSoporte,
   moderadorId: string,
 ): string[] {
+  if (!/^\d{17,20}$/.test(moderadorId)) {
+    throw new Error('El moderador responsable debe identificarse con su ID de Discord.')
+  }
   return [...new Set([
     ...participantes.reportantes.usuarios,
     ...participantes.reportados.usuarios,
