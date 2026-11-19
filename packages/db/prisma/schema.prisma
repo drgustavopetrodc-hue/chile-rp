@@ -140,6 +140,12 @@ enum TipoActuacionTicket {
   CIERRE
 }
 
+enum ResultadoActuacionTicket {
+  EXITOSA
+  FALLIDA
+  REVERTIDA
+}
+
 enum TipoExpedienteAdministrativo {
   PETICION
   RECLAMO
@@ -531,6 +537,8 @@ model TicketActuacion {
   equipoNuevo        EquipoTicket?
   prioridadAnterior  PrioridadTicket?
   prioridadNueva     PrioridadTicket?
+  resultado          ResultadoActuacionTicket @default(EXITOSA)
+  motivo             String?                  @db.Text
   detalle            String?              @db.Text
   creadaEn           DateTime             @default(now())
 

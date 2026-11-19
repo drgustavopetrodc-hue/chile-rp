@@ -5,7 +5,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "deploy-commands": "tsx src/deploy-commands.ts",
-    "test": "tsx --test src/utils/ia.test.ts src/utils/expedientes.test.ts"
+    "test": "tsx --test src/utils/ia.test.ts src/utils/expedientes.test.ts src/utils/acciones-ticket.test.ts"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.1.1",
