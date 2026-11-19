@@ -94,6 +94,18 @@ export function obtenerIdsAccesoSoporte(
   ])]
 }
 
+export function obtenerIdsUsuariosParaMover(
+  participantes: ParticipantesSoporte,
+  moderadorId: string,
+): string[] {
+  return [...new Set([
+    ...participantes.reportantes.usuarios,
+    ...participantes.reportados.usuarios,
+    ...participantes.testigos.usuarios,
+    moderadorId,
+  ])]
+}
+
 export function crearPermisosCanalSoporte(
   everyoneId: string,
   botId: string,

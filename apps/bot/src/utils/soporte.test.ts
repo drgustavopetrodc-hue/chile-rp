@@ -5,6 +5,7 @@ import {
   crearPermisosCanalSoporte,
   normalizarSufijoCanalSoporte,
   obtenerIdsAccesoSoporte,
+  obtenerIdsUsuariosParaMover,
   puedeIniciarSoporte,
   validarParticipantesSoporte,
 } from './soporte'
@@ -79,6 +80,14 @@ test('consolida identidades repetidas y conserva roles y ejecutor', () => {
     '400000000000000001',
     '500000000000000001',
   ])
+})
+
+test('incluye al moderador responsable al mover usuarios y elimina duplicados', () => {
+  assert.deepEqual(obtenerIdsUsuariosParaMover({
+    reportantes: { usuarios: ['reportante', 'moderador'] },
+    reportados: { usuarios: ['reportado'] },
+    testigos: { usuarios: ['testigo'] },
+  }, 'moderador'), ['reportante', 'moderador', 'reportado', 'testigo'])
 })
 
 test('solo permite iniciar el soporte a staff, moderación, administración o administradores Discord', () => {

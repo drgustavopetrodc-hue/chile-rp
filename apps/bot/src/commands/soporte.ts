@@ -31,6 +31,7 @@ import { asegurarUsuario } from '../utils/usuarios'
 import {
   normalizarSufijoCanalSoporte,
   obtenerIdsAccesoSoporte,
+  obtenerIdsUsuariosParaMover,
   puedeIniciarSoporte,
   crearPermisosCanalSoporte,
   validarParticipantesSoporte,
@@ -647,7 +648,7 @@ async function prepararSoporte(
 
   const rolesSupervision = await validarRolesSupervision(guild)
   const rolesParticipantes = await validarRolesParticipantes(guild, participantes)
-  const miembrosParticipantes = await validarMiembrosParticipantes(guild, participantes)
+  const miembrosParticipantes = await validarMiembrosParticipantes(guild, participantes, ejecutorId)
   const idsAcceso = obtenerIdsAccesoSoporte(participantes, ejecutorId, [
     ...rolesSupervision,
     ...rolesParticipantes,
@@ -841,11 +842,7 @@ async function crearSoporte(
 
   const bot = preparacion.bot
   const miembrosParticipantes = preparacion.miembrosParticipantes
-  const usuariosIndividuales = [...new Set([
-    ...participantes.reportantes.usuarios,
-    ...participantes.reportados.usuarios,
-    ...participantes.testigos.usuarios,
-  ])]
+  const usuariosIndividuales = obtenerIdsUsuariosParaMover(participantes, actor.id)
   for (const usuarioId of usuariosIndividuales) {
     const miembro = miembrosParticipantes.get(usuarioId)
     if (!miembro || !miembro.voice.channel) {
@@ -968,12 +965,9 @@ async function validarRolesParticipantes(
 async function validarMiembrosParticipantes(
   guild: Guild,
   participantes: ParticipantesSoporte,
+  moderadorId: string,
 ): Promise<Map<string, GuildMember>> {
-  const ids = [...new Set([
-    ...participantes.reportantes.usuarios,
-    ...participantes.reportados.usuarios,
-    ...participantes.testigos.usuarios,
-  ])]
+  const ids = obtenerIdsUsuariosParaMover(participantes, moderadorId)
   const miembros = new Map<string, GuildMember>()
   for (const id of ids) {
     const miembro = await guild.members.fetch(id).catch((error: unknown) => {
