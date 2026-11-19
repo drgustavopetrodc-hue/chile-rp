@@ -13,6 +13,7 @@ import {
   GuildMember,
   InteractionContextType,
   MessageFlags,
+  NewsChannel,
   PermissionFlagsBits,
   PermissionsBitField,
   RoleSelectMenuBuilder,
@@ -1873,12 +1874,15 @@ async function obtenerCanalLogSeguro(
   guild: Guild,
   canalId: string,
   requiereAdjuntos = true,
-): Promise<TextChannel | undefined> {
+): Promise<TextChannel | NewsChannel | undefined> {
   const canal = await guild.channels.fetch(canalId).catch((error: unknown) => {
     console.error(`[Soporte] No se pudo acceder al canal de logs ${canalId}:`, error)
     return null
   })
-  if (!canal || canal.type !== ChannelType.GuildText) return undefined
+  if (
+    !canal ||
+    (canal.type !== ChannelType.GuildText && canal.type !== ChannelType.GuildAnnouncement)
+  ) return undefined
 
   const bot = await guild.members.fetchMe()
   const permisosBot = bot.permissionsIn(canal)
@@ -1887,34 +1891,6 @@ async function obtenerCanalLogSeguro(
     !permisosBot.has(PermissionFlagsBits.SendMessages) ||
     (requiereAdjuntos && !permisosBot.has(PermissionFlagsBits.AttachFiles))
   ) return undefined
-
-  const rolEveryone = guild.roles.everyone
-  if (canal.permissionsFor(rolEveryone)?.has(PermissionFlagsBits.ViewChannel)) return undefined
-  const rolesAutorizados = new Set([
-    config.roles.staff,
-    config.roles.moderador,
-    config.roles.admin,
-  ].filter((id): id is string => !!id))
-  const roles = await guild.roles.fetch()
-  for (const rol of roles.values()) {
-    if (
-      rol.id === guild.id ||
-      rolesAutorizados.has(rol.id) ||
-      rol.permissions.has(PermissionFlagsBits.Administrator)
-    ) continue
-    if (canal.permissionsFor(rol)?.has(PermissionFlagsBits.ViewChannel)) return undefined
-  }
-
-  for (const overwrite of canal.permissionOverwrites.cache.values()) {
-    if (overwrite.type !== 1 || !overwrite.allow.has(PermissionFlagsBits.ViewChannel)) continue
-    if (overwrite.id === bot.id) continue
-    const miembro = await guild.members.fetch(overwrite.id).catch((error: unknown) => {
-      if (codigoDiscord(error) === 10007) return null
-      console.error(`[Soporte] No se pudo verificar el acceso individual ${overwrite.id} en ${canal.id}:`, error)
-      return null
-    })
-    if (!miembro || !esPersonalAutorizado(miembro)) return undefined
-  }
   return canal
 }
 
@@ -1933,7 +1909,7 @@ async function publicarGrabacionEnLogs(
   ])]) {
     const canal = await obtenerCanalLogSeguro(guild, canalId)
     if (!canal) {
-      const error = `Se omitió publicar audio en ${canalId}: el canal no es texto o no es privado para Staff autorizado.`
+      const error = `Se omitió publicar audio en ${canalId}: el canal no es texto/anuncio o el bot no tiene permisos para verlo, enviar o adjuntar archivos.`
       errores.push(error)
       console.error(`[Soporte ${registro.id}] ${error}`)
       continue
