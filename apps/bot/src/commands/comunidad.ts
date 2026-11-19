@@ -68,29 +68,6 @@ const confirmacionesCierreTicket = new Map<string, ConfirmacionCierreTicket>()
 const cierresTicketEnCurso = new Set<string>()
 const reasignacionesTicketEnCurso = new Set<string>()
 
-export const soporteData = new SlashCommandBuilder()
-  .setName('soporte')
-  .setDescription('Abre un ticket privado con el equipo de soporte')
-  .setContexts(InteractionContextType.Guild)
-  .addStringOption((o) =>
-    o
-      .setName('asunto')
-      .setDescription('Motivo de contacto')
-      .setRequired(true)
-      .setMaxLength(100),
-  )
-  .addStringOption((o) =>
-    o
-      .setName('categoria')
-      .setDescription('Tipo de solicitud')
-      .addChoices(
-        { name: 'Soporte', value: 'SOPORTE' },
-        { name: 'Reporte', value: 'REPORTE' },
-        { name: 'Apelación', value: 'APELACION' },
-        { name: 'Otro', value: 'OTRO' },
-      ),
-  )
-
 export const solicitarRolData = new SlashCommandBuilder()
   .setName('solicitar-rol')
   .setDescription('Postula a un cargo de una institución')
@@ -120,30 +97,11 @@ export const calificarData = new SlashCommandBuilder()
   .addStringOption((o) => o.setName('comentario').setDescription('Comentario opcional').setMaxLength(500))
 
 export const comunidad = [
-  { data: soporteData, execute: ejecutarSoporte },
   { data: ticketPanelData, execute: ejecutarTicketPanel },
   { data: ticketHistorialData, execute: ejecutarTicketHistorial },
   { data: solicitarRolData, execute: ejecutarSolicitud },
   { data: calificarData, execute: ejecutarCalificacion },
 ]
-
-async function ejecutarSoporte(i: ChatInputCommandInteraction) {
-  if (!i.inCachedGuild()) return i.reply({ content: 'Usa este comando dentro del servidor.', flags: efimero })
-  if (!config.roles.soporte) return i.reply({ content: 'Falta configurar ROL_SOPORTE_ID.', flags: efimero })
-  await i.deferReply({ flags: efimero })
-  const asunto = i.options.getString('asunto', true)
-  const categoria = (i.options.getString('categoria') ?? 'SOPORTE') as CategoriaTicket
-  try {
-    const resultado = await crearTicket(i.guild, i.user, asunto, categoria)
-    if ('existente' in resultado && resultado.existente) {
-      return i.editReply({ content: `Ya tienes un ticket abierto: <#${resultado.existente.canalDiscordId}>` })
-    }
-    return i.editReply({ content: `Ticket **#${resultado.ticket.numero}** creado: ${resultado.canal}.` })
-  } catch (error) {
-    console.error(`[Ticket] No se pudo crear un canal para ${i.user.tag}:`, error)
-    return i.editReply({ content: mensajeErrorCreacionTicket(error) })
-  }
-}
 
 async function ejecutarTicketPanel(i: ChatInputCommandInteraction) {
   if (!esAdmin(i)) return i.reply({ content: 'Solo administradores pueden publicar el panel de tickets.', flags: efimero })

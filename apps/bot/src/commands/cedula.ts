@@ -7,8 +7,9 @@ import {
   SlashCommandBuilder,
 } from 'discord.js'
 import { db } from '@rp-chile/db'
+import { ErrorAutorizacionSegundoPersonaje } from '@rp-chile/identity'
 import { config } from '../config'
-import { crearPersonaje } from '../utils/personajes'
+import { crearPersonaje, mensajeErrorIdentidadPersonaje } from '../utils/personajes'
 import { parsearFecha } from '../utils/fechas'
 import { crearEmbed, coloresEmbed } from '../utils/embeds'
 import { obtenerAvatarRoblox, RobloxLookupError } from '../utils/roblox'
@@ -101,13 +102,23 @@ export async function execute(i: ChatInputCommandInteraction) {
       if (error instanceof RobloxLookupError) return i.editReply(error.message)
       throw error
     }
-    const personaje = await crearPersonaje(
-      i.user,
-      i.options.getString('nombres', true),
-      i.options.getString('apellidos', true),
-      nacimiento,
-      roblox.username,
-    )
+    let personaje: Awaited<ReturnType<typeof crearPersonaje>>
+    try {
+      personaje = await crearPersonaje(
+        i.user,
+        i.options.getString('nombres', true),
+        i.options.getString('apellidos', true),
+        nacimiento,
+        roblox.username,
+      )
+    } catch (error) {
+      if (error instanceof ErrorAutorizacionSegundoPersonaje) {
+        return i.editReply('Ya tienes un personaje. El segundo requiere `/crear-dni-2do` y su rol correspondiente.')
+      }
+      const mensaje = mensajeErrorIdentidadPersonaje(error)
+      if (mensaje) return i.editReply(mensaje)
+      throw error
+    }
     const cedulaCreada = personaje.cedula
     if (!cedulaCreada) return i.editReply('El personaje se creó, pero no se pudo cargar su cédula. Contacta al staff.')
     return publicarImagenCedula(i, { ...personaje, cedula: cedulaCreada }, roblox.avatar, false)

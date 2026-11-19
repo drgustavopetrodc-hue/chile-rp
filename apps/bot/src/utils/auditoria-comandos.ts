@@ -16,7 +16,7 @@ const comandosSiempre = new Set([
   'multar', 'arrestar', 'liberar', 'antecedente',
   'config', 'seguridad', 'staff', 'ticket-panel', 'panel-verificacion', 'verificacion', 'bienvenida',
   'apertura', 'abrir', 'cerrar', 'cierre', 'entorno', 'alerta', 'alerta-reglas', 'embed',
-  'item', 'sueldo', 'institucion', 'contratar', 'database', 'agregar-presupuesto',
+  'item', 'sueldo', 'institucion', 'contratar', 'database', 'agregar-presupuesto', 'soporte',
   'ck', 'auto-reaccionar', 'emoji', 'editar', 'eliminar', 'agregar',
 ])
 

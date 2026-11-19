@@ -25,8 +25,13 @@ export const config = {
   canales: {
     revision: req('CANAL_REVISION_ID'),
     categoriaTickets: process.env.CATEGORIA_TICKETS_ID,
+    categoriaSoportes: '1571736003532562473',
     casosModeracion: req('CANAL_CASOS_MODERACION_ID'),
     logModeracion: req('CANAL_LOG_MODERACION_ID'),
     logAdministracion: req('CANAL_LOG_ADMIN_ID'),
+  },
+  grabaciones: {
+    directorio: process.env.SOPORTE_GRABACIONES_DIR,
+    retencionDias: Number(process.env.SOPORTE_RETENCION_DIAS || '30'),
   },
 }

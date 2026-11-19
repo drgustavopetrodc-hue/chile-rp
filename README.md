@@ -18,7 +18,7 @@ La web (Next.js) irá en `apps/web` y usará el mismo paquete `@rp-chile/db`.
 
 ## Requisitos
 
-- Node.js 22 o superior
+- Node.js 22.12 o superior
 - Una base de datos en [Neon](https://neon.tech) (necesitas la cadena *pooled* y la *direct*)
 - Una aplicación de bot creada en el Discord Developer Portal
 
@@ -51,6 +51,7 @@ La web (Next.js) irá en `apps/web` y usará el mismo paquete `@rp-chile/db`.
 - En el Developer Portal, sección **Bot**, activa el intent **Server Members**.
 - Invita el bot con los scopes `bot` y `applications.commands`, y con permisos para gestionar roles y apodos.
 - El rol del bot debe estar **por encima** de los roles *Ciudadano* y *No verificado*.
+- Para soportes, el bot también solicita el intent de gateway `GuildVoiceStates` y necesita poder ver y conectarse a los canales de voz privados.
 
 ## Estado
 
@@ -67,6 +68,8 @@ La web (Next.js) irá en `apps/web` y usará el mismo paquete `@rp-chile/db`.
 ## Seguridad
 
 Nunca subas archivos `.env` ni el token del bot a GitHub. El `.gitignore` ya los excluye. Si el token se filtra, regéneralo en el Developer Portal.
+
+La dependencia `@discordjs/node-pre-gyp@0.4.5` declara `tar@^6.1.11`, cuyo último 6.x (`6.2.1`) sigue afectado por avisos de seguridad. Se conserva `tar@7.5.23` mediante el override de la raíz, y el parche versionado en `patches/` amplía el rango declarado a `^7.5.23`; `postinstall` reaplica el parche después de cada instalación. Si se actualiza `tar`, revisa en conjunto el override, el parche y los resultados de `npm audit` y `npm ls tar --all`.
 
 ## Tickets y expedientes administrativos
 
@@ -90,4 +93,19 @@ El bot necesita un proceso siempre encendido (no sirve Vercel). Railway lo despl
 6. Cada `git push` a la rama principal vuelve a desplegar el bot automáticamente.
 
 Railway cobra por uso (CPU y memoria por segundo). Revisa el consumo en el panel y configura un límite de gasto.
+
+### Grabaciones de soportes
+
+Las grabaciones requieren un volumen persistente de Railway montado en `/data`. En ejecución, el bot comprueba que `/data` sea un punto de montaje y se niega a grabar si solo encuentra el filesystem efímero. Configura en las variables del servicio:
+
+- `SOPORTE_GRABACIONES_DIR=/data/grabaciones-soporte`
+- `SOPORTE_RETENCION_DIAS=30`
+
+El valor de 30 días es la política inicial aprobada y puede modificarse mediante `SOPORTE_RETENCION_DIAS`. Se guarda una pista Ogg Opus por emisor y una mezcla final Ogg Opus; se requiere al menos 128 MiB libres para iniciar o continuar una captura. La comprobación de montaje confirma que hay un volumen montado en `/data`, pero la persistencia tras reinicios debe validarse en el servicio Railway configurado.
+
+Antes de grabar, cada participante humano —incluido quien abre el soporte— debe aceptar individualmente mediante el botón. Rechazar impide iniciar y retirar el consentimiento detiene la captura. Si entra alguien nuevo, la grabación se pausa hasta que consienta. El soporte puede continuar sin grabación.
+
+Los audios finalizados se publican en los canales configurados para logs de moderación y administración, únicamente si el bot comprueba que su lectura está limitada a Staff autorizado. Si la comprobación o la carga falla, el soporte continúa y el expediente conserva los identificadores de los adjuntos; no se anuncian como publicados. La eliminación por retención borra los archivos locales y los mensajes de audio publicados; los eventos de auditoría en la base de datos se conservan. Si la grabación no quedó disponible en ambos logs seguros, no se permite borrar los canales del expediente hasta resolverlo.
+
+El bot no reanuda una captura tras reiniciarse. La recepción requiere que pueda conectarse al canal y recibir paquetes de audio. Las pruebas automatizadas locales validan Opus, la mezcla de dos pistas y la reproducción Ogg, pero no validan conexiones reales de Discord ni la persistencia del volumen Railway. `ffmpeg-static` incorpora un binario FFmpeg bajo GPL-3.0-or-later; revisa sus obligaciones antes de redistribuir el bot o el binario.
 "# chile-rp" 

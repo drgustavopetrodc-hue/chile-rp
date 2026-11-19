@@ -8,6 +8,11 @@ import { manejarConfirmacionAdministrativa } from './commands/ia-administracion'
 import { asegurarUsuario } from './utils/usuarios'
 import { enviarBienvenida } from './commands/bienvenida'
 import { manejarBotonTicket, manejarMensajeTicket, manejarModalTicket } from './commands/comunidad'
+import {
+  inicializarGrabacionesSoporte,
+  manejarEstadoVozSoporte,
+  manejarInteraccionSoporte,
+} from './commands/soporte'
 import { cargarConfiguracionServidor, configuracion, usuarioPuedeUsarComando } from './commands/configuracion'
 import { cargarAutoReaccion, manejarAutoReaccion } from './commands/owner'
 import { adaptarInteraccionAComponentsV2 } from './utils/components-v2'
@@ -16,7 +21,12 @@ import type { ChatInputCommandInteraction } from 'discord.js'
 
 const client = new Client({
   // GuildMembers es un intent privilegiado: actívalo en el Developer Portal > Bot.
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildVoiceStates,
+  ],
 })
 
 instalarProteccionAntiRaid(client)
@@ -26,7 +36,16 @@ const mapaComandos = new Map(comandos.map((c) => [c.data.name, c]))
 client.once(Events.ClientReady, async (c) => {
   await cargarConfiguracionServidor().catch((err) => console.error('No se pudo cargar la configuración del servidor:', err))
   await cargarAutoReaccion().catch((err) => console.error('No se pudo cargar la auto-reacción:', err))
+  await inicializarGrabacionesSoporte(client).catch((err) =>
+    console.error('No se pudo inicializar la retención de grabaciones de soporte:', err),
+  )
   console.log(`Bot conectado como ${c.user.tag}`)
+})
+
+client.on(Events.VoiceStateUpdate, (anterior, nuevo) => {
+  void manejarEstadoVozSoporte(anterior, nuevo).catch((error: unknown) => {
+    console.error('No se pudo actualizar el consentimiento de voz de un soporte:', error)
+  })
 })
 
 client.on(Events.MessageCreate, (mensaje) => {
@@ -80,6 +99,11 @@ client.on(Events.InteractionCreate, async (i) => {
       await manejarConfirmacionAdministrativa(i)
     } else if (i.isModalSubmit() && i.customId.startsWith('ticketpanel:')) {
       await manejarModalTicket(i)
+    } else if (
+      (i.isButton() || i.isUserSelectMenu() || i.isRoleSelectMenu()) &&
+      i.customId.startsWith('soporte:')
+    ) {
+      await manejarInteraccionSoporte(i)
     } else if (i.isButton() && i.customId.startsWith('verif:')) {
       await manejarBoton(i)
     } else if (i.isModalSubmit() && i.customId.startsWith('verif:')) {

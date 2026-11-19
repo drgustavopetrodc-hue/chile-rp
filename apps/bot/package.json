@@ -5,16 +5,21 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "deploy-commands": "tsx src/deploy-commands.ts",
-    "test": "tsx --test src/utils/ia.test.ts src/utils/expedientes.test.ts src/utils/acciones-ticket.test.ts"
+    "test": "tsx --test src/utils/ia.test.ts src/utils/expedientes.test.ts src/utils/acciones-ticket.test.ts src/utils/soporte.test.ts src/utils/soporte-grabacion.test.ts src/utils/soporte-tts.test.ts"
   },
   "dependencies": {
+    "@discordjs/opus": "0.11.0",
+    "@discordjs/voice": "0.19.2",
     "@napi-rs/canvas": "^1.1.1",
     "@rp-chile/db": "*",
+    "@rp-chile/identity": "*",
     "discord.js": "^14.16.0",
     "dotenv": "^16.4.5",
+    "ffmpeg-static": "5.3.0",
     "pdf-parse": "^2.4.5",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "node-edge-tts": "1.2.12"
   },
   "devDependencies": {
     "@types/node": "^22.0.0"

@@ -1,6 +1,8 @@
 import { ChatInputCommandInteraction, InteractionContextType, MessageFlags, SlashCommandBuilder } from 'discord.js'
 import { db } from '@rp-chile/db'
-import { crearPersonaje } from '../utils/personajes'
+import { ErrorAutorizacionSegundoPersonaje } from '@rp-chile/identity'
+import type { AutorizarSegundoPersonaje } from '@rp-chile/identity'
+import { crearPersonaje, mensajeErrorIdentidadPersonaje } from '../utils/personajes'
 import { parsearFecha } from '../utils/fechas'
 import { obtenerAvatarRoblox, RobloxLookupError } from '../utils/roblox'
 import { publicarImagenCedula } from './cedula'
@@ -16,8 +18,16 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(i: ChatInputCommandInteraction) {
   const rolId = process.env.ROL_SEGUNDO_PERSONAJE_ID
-  if (!rolId || !i.inCachedGuild() || !i.member.roles.cache.has(rolId)) {
+  const miembro = i.inCachedGuild() ? i.member : undefined
+  if (!rolId || !miembro) {
     return i.reply({ content: 'Necesitas el rol de segundo personaje para usar este comando.', flags: MessageFlags.Ephemeral })
+  }
+  const rolesDiscord = new Set(miembro.roles.cache.keys())
+  if (!rolesDiscord.has(rolId)) {
+    return i.reply({ content: 'Necesitas el rol de segundo personaje para usar este comando.', flags: MessageFlags.Ephemeral })
+  }
+  const autorizarSegundoPersonaje: AutorizarSegundoPersonaje = () => {
+    if (!rolesDiscord.has(rolId)) throw new ErrorAutorizacionSegundoPersonaje()
   }
   const usuario = await db.usuario.findUnique({ where: { discordId: i.user.id } })
   if (usuario?.verificacion !== 'VERIFICADO') {
@@ -37,13 +47,24 @@ export async function execute(i: ChatInputCommandInteraction) {
     if (error instanceof RobloxLookupError) return i.editReply(error.message)
     throw error
   }
-  const personaje = await crearPersonaje(
-    i.user,
-    i.options.getString('nombres', true),
-    i.options.getString('apellidos', true),
-    fecha,
-    roblox.username,
-  )
+  let personaje: Awaited<ReturnType<typeof crearPersonaje>>
+  try {
+    personaje = await crearPersonaje(
+      i.user,
+      i.options.getString('nombres', true),
+      i.options.getString('apellidos', true),
+      fecha,
+      roblox.username,
+      { autorizarSegundoPersonaje },
+    )
+  } catch (error) {
+    if (error instanceof ErrorAutorizacionSegundoPersonaje) {
+      return i.editReply('Necesitas el rol de segundo personaje para usar este comando.')
+    }
+    const mensaje = mensajeErrorIdentidadPersonaje(error)
+    if (mensaje) return i.editReply(mensaje)
+    throw error
+  }
   const cedulaCreada = personaje.cedula
   if (!cedulaCreada) return i.editReply('El personaje se creó, pero no se pudo cargar su cédula. Contacta al staff.')
   return publicarImagenCedula(i, { ...personaje, cedula: cedulaCreada }, roblox.avatar, true)

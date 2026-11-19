@@ -1,0 +1,13 @@
+diff --git a/node_modules/@discordjs/node-pre-gyp/package.json b/node_modules/@discordjs/node-pre-gyp/package.json
+index ff6f24e..9802c19 100644
+--- a/node_modules/@discordjs/node-pre-gyp/package.json
++++ b/node_modules/@discordjs/node-pre-gyp/package.json
+@@ -31,7 +31,7 @@
+ 		"npmlog": "^5.0.1",
+ 		"rimraf": "^3.0.2",
+ 		"semver": "^7.3.5",
+-		"tar": "^6.1.11"
++		"tar": "^7.5.23"
+ 	},
+ 	"devDependencies": {
+ 		"eslint": "^8.2.0",
