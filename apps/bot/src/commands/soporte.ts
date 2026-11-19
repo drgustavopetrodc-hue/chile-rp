@@ -789,7 +789,7 @@ async function crearSoporte(
 
     mensajeInicial = await canalEvidenciasCreado.send({
       embeds: [crearEmbedSoporte(registro)],
-      components: componentesControlesSoporte(registro, false, true),
+      components: componentesControlesSoporte(registro, true, true),
       allowedMentions: { parse: [] },
     })
     registro.mensajeInicialId = mensajeInicial.id
@@ -891,7 +891,7 @@ async function crearSoporte(
   try {
     await mensajeInicial.edit({
       embeds: [crearEmbedSoporte(registro)],
-      components: componentesControlesSoporte(registro),
+      components: componentesControlesSoporte(registro, true, true),
       allowedMentions: { parse: [] },
     })
   } catch (error) {
@@ -2143,7 +2143,7 @@ async function iniciarConfirmacionEliminacionGrabacion(
   registro: RegistroSoporte,
 ) {
   if (!i.isButton()) return
-  const nonce = randomUUID()
+  const nonce = crearNonceConfirmacion()
   confirmacionesGrabacion.set(nonce, {
     soporteId: registro.id,
     ejecutorId: i.user.id,
@@ -2168,6 +2168,10 @@ async function iniciarConfirmacionEliminacionGrabacion(
     flags: efimero,
     allowedMentions: { parse: [] },
   })
+}
+
+function crearNonceConfirmacion(): string {
+  return randomUUID().replace(/-/g, '').slice(0, 22)
 }
 
 async function manejarConfirmacionEliminacionGrabacion(
@@ -2564,7 +2568,7 @@ async function actualizarMensajeSoporte(guild: Guild, registro: RegistroSoporte)
 }
 
 async function iniciarConfirmacionEliminacion(i: ButtonInteraction, registro: RegistroSoporte) {
-  const nonce = randomUUID()
+  const nonce = crearNonceConfirmacion()
   confirmacionesEliminacion.set(nonce, {
     soporteId: registro.id,
     ejecutorId: i.user.id,

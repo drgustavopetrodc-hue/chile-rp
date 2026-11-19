@@ -39,6 +39,7 @@ test('silencia a los miembros durante el anuncio y restaura solo los que silenci
     id,
     user: { bot: false },
     voice: {
+      channelId: 'voz',
       get serverMute() { return estados.get(id)! },
       async setMute(mute: boolean) {
         llamadas.push({ id, mute })
@@ -50,6 +51,7 @@ test('silencia a los miembros durante el anuncio y restaura solo los que silenci
     id: 'bot',
     user: { bot: true },
     voice: {
+      channelId: 'voz',
       get serverMute() { return false },
       async setMute(mute: boolean) {
         llamadas.push({ id: 'bot', mute })
@@ -58,7 +60,7 @@ test('silencia a los miembros durante el anuncio y restaura solo los que silenci
   })
 
   let reproduccionVioSilencioCompleto = false
-  await ejecutarConParticipantesSilenciados(miembros, async () => {
+  await ejecutarConParticipantesSilenciados(miembros, 'voz', async () => {
     reproduccionVioSilencioCompleto =
       estados.get('participante') === true &&
       estados.get('moderador') === true &&
@@ -83,16 +85,54 @@ test('restaura los silencios temporales aunque falle la reproducción', async ()
     id: 'participante',
     user: { bot: false },
     voice: {
+      channelId: 'voz',
       get serverMute() { return serverMute },
       async setMute(mute: boolean) { serverMute = mute },
     },
   }
 
   await assert.rejects(
-    ejecutarConParticipantesSilenciados([miembro], async () => {
+    ejecutarConParticipantesSilenciados([miembro], 'voz', async () => {
       throw new Error('fallo de reproducción')
     }),
     /fallo de reproducción/,
   )
   assert.equal(serverMute, false)
+})
+
+test('omite miembros fuera de la sala y tolera una desconexión concurrente', async () => {
+  let reproduccionEjecutada = false
+  let llamadas = 0
+  const desconectado = {
+    id: 'desconectado',
+    user: { bot: false },
+    voice: {
+      channelId: null,
+      serverMute: false,
+      async setMute() {
+        llamadas++
+      },
+    },
+  }
+  const desconectandose = {
+    id: 'desconectandose',
+    user: { bot: false },
+    voice: {
+      channelId: 'voz',
+      serverMute: false,
+      async setMute() {
+        llamadas++
+        throw Object.assign(new Error('Target user is not connected to voice'), { code: 40032 })
+      },
+    },
+  }
+
+  await ejecutarConParticipantesSilenciados(
+    [desconectado, desconectandose],
+    'voz',
+    async () => { reproduccionEjecutada = true },
+  )
+
+  assert.equal(reproduccionEjecutada, true)
+  assert.equal(llamadas, 1)
 })

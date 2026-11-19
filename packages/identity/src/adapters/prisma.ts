@@ -45,8 +45,8 @@ export function crearStoreIdentidad(cliente: ClientePrismaCompartido): StoreIden
 function crearOperaciones(cliente: ClientePrismaDatos): OperacionesIdentidad {
   return {
     bloquearCreacionPersonaje: async (discordId) => {
-      await cliente.$queryRaw<unknown[]>`
-        SELECT pg_advisory_xact_lock(hashtext(${`rp-chile:identity:personajes:${discordId}`}))
+      await cliente.$queryRaw<{ lock: string }[]>`
+        SELECT pg_advisory_xact_lock(hashtext(${`rp-chile:identity:personajes:${discordId}`}))::text AS lock
       `
     },
     upsertUsuarioPerfil: (perfil: PerfilDiscord) => cliente.usuario.upsert({

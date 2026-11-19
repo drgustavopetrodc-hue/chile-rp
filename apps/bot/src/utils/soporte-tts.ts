@@ -80,6 +80,7 @@ export async function reproducirAnuncioSoporte(
       }
       await ejecutarConParticipantesSilenciados(
         [...canal.members.values()],
+        canal.id,
         () => reproducirEnConexion(conexion!, textoSeguro, registrarAudioBot),
       )
     })
@@ -92,6 +93,7 @@ export interface ParticipanteSilenciable {
   id: string
   user: { bot: boolean }
   voice: {
+    channelId: string | null
     serverMute: boolean | null
     setMute(muted: boolean, reason?: string): Promise<unknown>
   }
@@ -99,19 +101,28 @@ export interface ParticipanteSilenciable {
 
 export async function ejecutarConParticipantesSilenciados(
   miembros: readonly ParticipanteSilenciable[],
+  canalId: string,
   reproducir: () => Promise<void>,
 ): Promise<void> {
   const silenciados: ParticipanteSilenciable[] = []
   const errores: unknown[] = []
   const miembrosQueDebenSilenciarse = [...new Map(
     miembros
-      .filter((miembro) => !miembro.user.bot && miembro.voice.serverMute !== true)
+      .filter((miembro) =>
+        !miembro.user.bot &&
+        miembro.voice.channelId === canalId &&
+        miembro.voice.serverMute !== true,
+      )
       .map((miembro) => [miembro.id, miembro]),
   ).values()]
   const resultadosSilencio = await Promise.allSettled(
     miembrosQueDebenSilenciarse.map(async (miembro) => {
-      await miembro.voice.setMute(true, 'Anuncio de voz del soporte institucional')
-      silenciados.push(miembro)
+      try {
+        await miembro.voice.setMute(true, 'Anuncio de voz del soporte institucional')
+        silenciados.push(miembro)
+      } catch (error) {
+        if (!esErrorMiembroDesconectado(error)) throw error
+      }
     }),
   )
   errores.push(...resultadosSilencio.flatMap((resultado) =>
@@ -127,9 +138,13 @@ export async function ejecutarConParticipantesSilenciados(
   }
 
   const resultadosRestauracion = await Promise.allSettled(
-    silenciados.map((miembro) =>
-      miembro.voice.setMute(false, 'Finalizó el anuncio de voz del soporte institucional'),
-    ),
+    silenciados.map(async (miembro) => {
+      try {
+        await miembro.voice.setMute(false, 'Finalizó el anuncio de voz del soporte institucional')
+      } catch (error) {
+        if (!esErrorMiembroDesconectado(error)) throw error
+      }
+    }),
   )
   errores.push(...resultadosRestauracion.flatMap((resultado) =>
     resultado.status === 'rejected' ? [resultado.reason] : [],
@@ -139,6 +154,13 @@ export async function ejecutarConParticipantesSilenciados(
   if (errores.length > 1) {
     throw new AggregateError(errores, 'No se pudo completar el anuncio o restaurar el audio de todos los miembros.')
   }
+}
+
+function esErrorMiembroDesconectado(error: unknown): boolean {
+  return typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 40032
 }
 
 async function encolarReproduccion(
