@@ -100,7 +100,7 @@ test('persiste manifiestos, identifica vencimiento y recupera sesiones sin reanu
   }
 })
 
-test('decodifica Opus y mezcla dos pistas de audio real en un Ogg reproducible', {
+test('decodifica Opus y mezcla la voz del bot en su instante original dentro de un Ogg reproducible', {
   timeout: 120_000,
 }, async () => {
   assert.ok(ffmpegPath, 'FFmpeg debe estar instalado para habilitar la grabación')
@@ -129,13 +129,14 @@ test('decodifica Opus y mezcla dos pistas de audio real en un Ogg reproducible',
       codificarPcm(ogg880, pista880),
     ])
     await Promise.all([verificarOgg(ogg440), verificarOgg(ogg880)])
-    await mezclarPistas([ogg440, ogg880], mezcla)
+    await mezclarPistas([ogg440], mezcla, [{ path: ogg880, inicioMs: 500 }])
     await verificarOgg(mezcla)
 
     const decodificadoMezcla = await decodificarOgg(mezcla)
-    assert.ok(decodificadoMezcla.length > 40_000)
-    assert.ok(magnitudEnFrecuencia(decodificadoMezcla, 440) > 100)
-    assert.ok(magnitudEnFrecuencia(decodificadoMezcla, 880) > 100)
+    assert.ok(decodificadoMezcla.length > 120_000, `longitud PCM mezclada: ${decodificadoMezcla.length}`)
+    assert.ok(magnitudEnFrecuencia(decodificadoMezcla, 440, 2_000, 10_000) > 100)
+    assert.ok(magnitudEnFrecuencia(decodificadoMezcla, 880, 2_000, 10_000) < 100)
+    assert.ok(magnitudEnFrecuencia(decodificadoMezcla, 880, 26_000, 34_000) > 100)
     assert.equal((await readFile(mezcla)).subarray(0, 4).toString('ascii'), 'OggS')
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -163,9 +164,13 @@ function calcularRms(pcm: Buffer): number {
   return Math.sqrt(sumaCuadrados / Math.max(muestras, 1))
 }
 
-function magnitudEnFrecuencia(pcm: Buffer, frecuencia: number): number {
-  const inicio = 2_000
-  const fin = Math.min(Math.floor(pcm.length / 4), 10_000)
+function magnitudEnFrecuencia(
+  pcm: Buffer,
+  frecuencia: number,
+  inicio: number,
+  finSolicitado: number,
+): number {
+  const fin = Math.min(Math.floor(pcm.length / 4), finSolicitado)
   let real = 0
   let imaginaria = 0
   for (let muestra = inicio; muestra < fin; muestra += 1) {

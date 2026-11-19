@@ -101,9 +101,11 @@ Las grabaciones requieren un volumen persistente de Railway montado en `/data`. 
 - `SOPORTE_GRABACIONES_DIR=/data/grabaciones-soporte`
 - `SOPORTE_RETENCION_DIAS=30`
 
-El valor de 30 días es la política inicial aprobada y puede modificarse mediante `SOPORTE_RETENCION_DIAS`. Se guarda una pista Ogg Opus por emisor y una mezcla final Ogg Opus; se requiere al menos 128 MiB libres para iniciar o continuar una captura. La comprobación de montaje confirma que hay un volumen montado en `/data`, pero la persistencia tras reinicios debe validarse en el servicio Railway configurado.
+El valor de 30 días es la política inicial aprobada y puede modificarse mediante `SOPORTE_RETENCION_DIAS`. Se guarda una pista Ogg Opus por emisor y una mezcla final Ogg Opus; la mezcla incluye los anuncios TTS del bot que ocurren mientras la captura consentida está activa, pero las pistas individuales de participantes permanecen separadas. Se requiere al menos 128 MiB libres para iniciar o continuar una captura. La comprobación de montaje confirma que hay un volumen montado en `/data`, pero la persistencia tras reinicios debe validarse en el servicio Railway configurado.
 
 Antes de grabar, cada participante humano —incluido quien abre el soporte— debe aceptar individualmente mediante el botón. Rechazar impide iniciar y retirar el consentimiento detiene la captura. Si entra alguien nuevo, la grabación se pausa hasta que consienta. El soporte puede continuar sin grabación.
+
+Si un participante retira su consentimiento durante una captura, el bot detiene la grabación, cierra el soporte y registra el motivo en los logs de Moderación y Administración. Elimina automáticamente los canales de voz y evidencias solo cuando el retiro, el cierre y, si hubo grabación finalizada, sus archivos están registrados en todos los logs configurados; si falla una publicación o auditoría, conserva los canales para proteger el acceso a la evidencia.
 
 Los audios finalizados se publican en los canales configurados para logs de moderación y administración, únicamente si el bot comprueba que su lectura está limitada a Staff autorizado. Si la comprobación o la carga falla, el soporte continúa y el expediente conserva los identificadores de los adjuntos; no se anuncian como publicados. La eliminación por retención borra los archivos locales y los mensajes de audio publicados; los eventos de auditoría en la base de datos se conservan. Si la grabación no quedó disponible en ambos logs seguros, no se permite borrar los canales del expediente hasta resolverlo.
 

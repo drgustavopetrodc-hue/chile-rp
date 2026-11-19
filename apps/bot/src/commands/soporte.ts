@@ -32,6 +32,7 @@ import {
   normalizarSufijoCanalSoporte,
   obtenerIdsAccesoSoporte,
   obtenerIdsUsuariosParaMover,
+  puedeEliminarTrasRetirarConsentimiento,
   puedeIniciarSoporte,
   crearPermisosCanalSoporte,
   validarParticipantesSoporte,
@@ -1045,7 +1046,7 @@ async function registrarEventoSoporte(
   registro: RegistroSoporte,
   evento: string,
   detalles: Record<string, unknown> = {},
-) {
+): Promise<string[]> {
   const detalle = JSON.parse(JSON.stringify({
     evento,
     soporte: registro,
@@ -1061,7 +1062,9 @@ async function registrarEventoSoporte(
     },
   })
   const guild = guildsSoporteActivos.get(registro.id)
-  if (guild) await publicarEventoSoporteEnLogs(guild, actorId, registro, evento, detalles)
+  return guild
+    ? publicarEventoSoporteEnLogs(guild, actorId, registro, evento, detalles)
+    : []
 }
 
 async function registrarErrorCreacionSoporte(
@@ -1277,7 +1280,14 @@ async function anunciarEnSoporte(
       throw new Error('El canal de voz del soporte no está disponible para reproducir TTS.')
     }
     const grabador = grabadoresSoporte.get(registro.id)
-    await reproducirAnuncioSoporte(canalVoz, texto, grabador?.conexion)
+    await reproducirAnuncioSoporte(
+      canalVoz,
+      texto,
+      grabador?.conexion,
+      grabador
+        ? (rutaOgg, inicioMonotono) => grabador.registrarAudioBot(rutaOgg, inicioMonotono)
+        : undefined,
+    )
     await registrarEventoSoporte(null, registro, 'anuncio_tts_reproducido', {
       tipo,
       proveedor: 'Microsoft Edge Read Aloud',
@@ -1390,32 +1400,68 @@ async function manejarConsentimientoGrabacion(
   grabador.manifiesto.consentimientos = registro.consentimientos
   await grabador.actualizarConsentimientos(registro.consentimientos)
   registrosSoporteActivos.set(soporteId, registro)
-  await registrarEventoGrabacion(guild, actor.id, registro, `consentimiento_${estado.toLowerCase()}`, {
+  const canalesRetiroRegistrado = await registrarEventoGrabacion(
+    guild,
+    actor.id,
+    registro,
+    `consentimiento_${estado.toLowerCase()}`,
+    {
     participanteId: i.user.id,
     estado,
     actualizadoEn,
+    },
+  )
+  await actualizarMensajeSoporte(guild, registro).catch((error: unknown) => {
+    console.error(`[Soporte ${soporteId}] No se pudo actualizar el consentimiento en el expediente:`, error)
   })
-  await actualizarMensajeSoporte(guild, registro)
 
-  if (estado === 'RECHAZADO' || estado === 'RETIRADO') {
+  if (estado === 'RECHAZADO') {
     const actualizado = await detenerGrabacionSoporte(
       guild,
       actor.id,
       registro,
-      estado === 'RETIRADO' ? 'consentimiento_retirado' : 'consentimiento_rechazado',
+      'consentimiento_rechazado',
     )
     await anunciarEnSoporte(
       guild,
       actualizado,
-      estado === 'RETIRADO'
-        ? anunciosTtsSoporte.consentimientoRetirado
-        : anunciosTtsSoporte.consentimientoRechazado,
-      estado === 'RETIRADO' ? 'consentimiento_retirado' : 'consentimiento_rechazado',
+      anunciosTtsSoporte.consentimientoRechazado,
+      'consentimiento_rechazado',
     )
     return i.followUp({
-      content: estado === 'RETIRADO'
-        ? `Se retiró tu consentimiento. La captura se detuvo; estado: **${actualizado.grabacion}**.`
-        : 'Se registró tu rechazo. No se iniciará o reanudará la grabación; el soporte continúa.',
+      content: 'Se registró tu rechazo. No se iniciará o reanudará la grabación; el soporte continúa.',
+      flags: efimero,
+    })
+  }
+
+  if (estado === 'RETIRADO') {
+    const actualizado = await detenerGrabacionSoporte(
+      guild,
+      actor.id,
+      registro,
+      'consentimiento_retirado',
+    )
+    await anunciarEnSoporte(
+      guild,
+      actualizado,
+      anunciosTtsSoporte.consentimientoRetirado,
+      'consentimiento_retirado',
+    )
+    const cierre = await cerrarSoportePorRetiroConsentimiento(
+      guild,
+      actor.id,
+      actualizado,
+      i.user.id,
+      canalesRetiroRegistrado,
+    )
+    return i.followUp({
+      content: cierre.canalesEliminados
+        ? `Se retiró tu consentimiento. La captura se detuvo y el soporte \`${soporteId}\` se cerró; se registró el evento y se eliminaron sus canales.`
+        : cierre.cerrado && !cierre.eliminacionIntentada
+          ? `Se retiró tu consentimiento y el soporte \`${soporteId}\` se cerró. Conservé los canales para proteger la evidencia porque no se pudo confirmar su registro completo en los logs institucionales.`
+          : cierre.cerrado
+            ? `Se cerró el soporte \`${soporteId}\`, pero no se pudieron eliminar ambos canales. El resultado quedó en los registros institucionales.`
+            : `Se detuvo la captura, pero no se pudo persistir el cierre del soporte \`${soporteId}\`. Los canales se conservaron y se notificó el error.`,
       flags: efimero,
     })
   }
@@ -1782,9 +1828,9 @@ async function registrarEventoGrabacion(
   registro: RegistroSoporte,
   evento: string,
   detalles: Record<string, unknown> = {},
-): Promise<void> {
+): Promise<string[]> {
   if (guild) guildsSoporteActivos.set(registro.id, guild)
-  await registrarEventoSoporte(actorId, registro, evento, detalles)
+  return registrarEventoSoporte(actorId, registro, evento, detalles)
 }
 
 async function publicarEventoSoporteEnLogs(
@@ -1793,7 +1839,7 @@ async function publicarEventoSoporteEnLogs(
   registro: RegistroSoporte,
   evento: string,
   detalles: Record<string, unknown>,
-): Promise<void> {
+): Promise<string[]> {
   const contenido = [
     `## Soporte · ${evento}`,
     `**Identificador:** \`${registro.id}\``,
@@ -1802,18 +1848,21 @@ async function publicarEventoSoporteEnLogs(
     `**Detalles:** ${JSON.stringify(detalles).replace(/https?:\/\/\S+/gi, '[URL]').slice(0, 1200) || '—'}`,
     `**Fecha:** ${fechaHoraSoporte(new Date().toISOString())}`,
   ].join('\n')
-  await Promise.all([...new Set([
+  const resultados = await Promise.all([...new Set([
     config.canales.logModeracion,
     config.canales.logAdministracion,
   ])].map(async (canalId) => {
     try {
       const canal = await obtenerCanalLogSeguro(guild, canalId, false)
-      if (!canal) return
+      if (!canal) return undefined
       await canal.send({ content: contenido, allowedMentions: { parse: [] } })
+      return canalId
     } catch (error) {
       console.error(`[Soporte ${registro.id}] No se pudo registrar ${evento} en el canal de logs ${canalId}:`, error)
+      return undefined
     }
   }))
+  return resultados.filter((canalId): canalId is string => !!canalId)
 }
 
 async function obtenerCanalLogSeguro(
@@ -2400,6 +2449,102 @@ async function finalizarSoporte(i: ButtonInteraction, guild: Guild, registro: Re
   }
 }
 
+async function cerrarSoportePorRetiroConsentimiento(
+  guild: Guild,
+  actorId: string,
+  registro: RegistroSoporte,
+  participanteId: string,
+  canalesRetiroRegistrado: string[],
+): Promise<{
+  cerrado: boolean
+  canalesEliminados: boolean
+  eliminacionIntentada: boolean
+}> {
+  if (registro.estado !== 'ABIERTO' || cierresEnCurso.has(registro.id)) {
+    return { cerrado: false, canalesEliminados: false, eliminacionIntentada: false }
+  }
+  cierresEnCurso.add(registro.id)
+  try {
+    const cerrado: RegistroSoporte = {
+      ...registro,
+      estado: 'CERRADO',
+      cerradoEn: new Date().toISOString(),
+      cerradoPorId: participanteId,
+    }
+    registrosSoporteActivos.set(registro.id, cerrado)
+    let canalesCierreRegistrado: string[]
+    try {
+      canalesCierreRegistrado = await registrarEventoSoporte(
+        actorId,
+        cerrado,
+        'cierre_por_retiro_consentimiento',
+        {
+          participanteId,
+          consentimiento: 'RETIRADO',
+          motivo: 'El soporte se cierra automáticamente para respetar el retiro del consentimiento.',
+        },
+      )
+    } catch (error) {
+      console.error(`[Soporte ${registro.id}] No se pudo persistir el cierre por retiro de consentimiento:`, error)
+      await actualizarMensajeSoporte(guild, cerrado).catch((errorMensaje: unknown) => {
+        console.error(`[Soporte ${registro.id}] No se pudo actualizar el expediente cerrado:`, errorMensaje)
+      })
+      return { cerrado: false, canalesEliminados: false, eliminacionIntentada: false }
+    }
+
+    await actualizarMensajeSoporte(guild, cerrado).catch((error: unknown) => {
+      console.error(`[Soporte ${registro.id}] No se pudo actualizar el expediente cerrado:`, error)
+    })
+
+    const canalesRequeridos = [...new Set([
+      config.canales.logModeracion,
+      config.canales.logAdministracion,
+    ])]
+    const puedeEliminar = puedeEliminarTrasRetirarConsentimiento(
+      canalesRequeridos,
+      canalesRetiroRegistrado,
+      canalesCierreRegistrado,
+      cerrado.mensajesLog.map(({ canalId }) => canalId),
+      cerrado.grabacion === 'FINALIZADA',
+    )
+    if (!puedeEliminar) {
+      return { cerrado: true, canalesEliminados: false, eliminacionIntentada: false }
+    }
+
+    const voz = await eliminarCanalSoporte(
+      guild,
+      cerrado.canalVozId,
+      'Retiro de consentimiento; cierre automático del soporte',
+    )
+    const evidencias = await eliminarCanalSoporte(
+      guild,
+      cerrado.canalEvidenciasId,
+      'Retiro de consentimiento; cierre automático del soporte',
+    )
+    const actualizado: RegistroSoporte = {
+      ...cerrado,
+      canalesEliminados: { voz: voz.eliminado, evidencias: evidencias.eliminado },
+    }
+    registrosSoporteActivos.set(registro.id, actualizado)
+    await registrarEventoSoporte(actorId, actualizado, 'canales_eliminados_por_retiro_consentimiento', {
+      participanteId,
+      voz: voz.eliminado,
+      errorVoz: voz.error,
+      evidencias: evidencias.eliminado,
+      errorEvidencias: evidencias.error,
+    }).catch((error: unknown) => {
+      console.error(`[Soporte ${registro.id}] No se pudo auditar el resultado de eliminación automática:`, error)
+    })
+    return {
+      cerrado: true,
+      canalesEliminados: voz.eliminado && evidencias.eliminado,
+      eliminacionIntentada: true,
+    }
+  } finally {
+    cierresEnCurso.delete(registro.id)
+  }
+}
+
 async function actualizarMensajeSoporte(guild: Guild, registro: RegistroSoporte) {
   if (!registro.mensajeInicialId) return
   const canal = await guild.channels.fetch(registro.canalEvidenciasId)
@@ -2555,11 +2700,15 @@ async function manejarConfirmacionEliminacion(
   }
 }
 
-async function eliminarCanalSoporte(guild: Guild, canalId: string) {
+async function eliminarCanalSoporte(
+  guild: Guild,
+  canalId: string,
+  motivo = 'Cierre confirmado de expediente de soporte',
+) {
   try {
     const canal = await guild.channels.fetch(canalId)
     if (!canal) return { eliminado: true, error: null }
-    await canal.delete('Cierre confirmado de expediente de soporte')
+    await canal.delete(motivo)
     return { eliminado: true, error: null }
   } catch (error) {
     if (codigoDiscord(error) === 10003) return { eliminado: true, error: null }

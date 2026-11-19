@@ -106,6 +106,22 @@ export function obtenerIdsUsuariosParaMover(
   ])]
 }
 
+export function puedeEliminarTrasRetirarConsentimiento(
+  canalesRequeridos: readonly string[],
+  canalesRetiroRegistrado: readonly string[],
+  canalesCierreRegistrado: readonly string[],
+  canalesGrabacionPublicada: readonly string[],
+  grabacionFinalizada: boolean,
+): boolean {
+  const contieneTodos = (publicados: readonly string[]) => {
+    const conjunto = new Set(publicados)
+    return canalesRequeridos.length > 0 && canalesRequeridos.every((canalId) => conjunto.has(canalId))
+  }
+  return contieneTodos(canalesRetiroRegistrado) &&
+    contieneTodos(canalesCierreRegistrado) &&
+    (!grabacionFinalizada || contieneTodos(canalesGrabacionPublicada))
+}
+
 export function crearPermisosCanalSoporte(
   everyoneId: string,
   botId: string,

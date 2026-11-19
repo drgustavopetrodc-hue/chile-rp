@@ -6,6 +6,7 @@ import {
   normalizarSufijoCanalSoporte,
   obtenerIdsAccesoSoporte,
   obtenerIdsUsuariosParaMover,
+  puedeEliminarTrasRetirarConsentimiento,
   puedeIniciarSoporte,
   validarParticipantesSoporte,
 } from './soporte'
@@ -88,6 +89,38 @@ test('incluye al moderador responsable al mover usuarios y elimina duplicados', 
     reportados: { usuarios: ['reportado'] },
     testigos: { usuarios: ['testigo'] },
   }, 'moderador'), ['reportante', 'moderador', 'reportado', 'testigo'])
+})
+
+test('solo permite eliminar canales tras registrar el retiro, cierre y logs de la grabación', () => {
+  const canales = ['moderacion', 'administracion']
+  assert.equal(puedeEliminarTrasRetirarConsentimiento(
+    canales,
+    canales,
+    canales,
+    canales,
+    true,
+  ), true)
+  assert.equal(puedeEliminarTrasRetirarConsentimiento(
+    canales,
+    ['moderacion'],
+    canales,
+    canales,
+    true,
+  ), false)
+  assert.equal(puedeEliminarTrasRetirarConsentimiento(
+    canales,
+    canales,
+    canales,
+    ['moderacion'],
+    true,
+  ), false)
+  assert.equal(puedeEliminarTrasRetirarConsentimiento(
+    canales,
+    canales,
+    canales,
+    [],
+    false,
+  ), true)
 })
 
 test('solo permite iniciar el soporte a staff, moderación, administración o administradores Discord', () => {

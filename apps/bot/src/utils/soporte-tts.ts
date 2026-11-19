@@ -14,6 +14,7 @@ import { EdgeTTS } from 'node-edge-tts'
 import { createReadStream } from 'node:fs'
 import { mkdtemp, open, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { performance } from 'node:perf_hooks'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import ffmpegPath from 'ffmpeg-static'
@@ -35,7 +36,7 @@ export const anunciosTtsSoporte = {
   consentimientoRechazado:
     'Se informa que no se obtuvo el consentimiento de todos los participantes. La grabación no se iniciará y el soporte continuará sin grabación.',
   consentimientoRetirado:
-    'Se informa que un participante ha retirado su consentimiento. El sistema de grabación se ha detenido y el soporte continuará sin grabación activa.',
+    'Se informa que un participante ha retirado su consentimiento. La grabación se detuvo y el soporte será cerrado. Los canales se conservarán si la evidencia no puede archivarse de forma segura.',
   errorGrabacion:
     'Se ha producido un inconveniente técnico. La grabación no está disponible y el soporte continuará sin grabación activa. Por favor, mantengan los antecedentes en el canal de texto.',
 } as const
@@ -49,6 +50,7 @@ export async function reproducirAnuncioSoporte(
   canal: VoiceChannel,
   texto: string,
   conexionExistente?: VoiceConnection,
+  registrarAudioBot?: (rutaOgg: string, inicioMonotono: number) => Promise<void>,
 ): Promise<void> {
   const textoSeguro = texto.trim()
   if (!textoSeguro) throw new Error('El anuncio TTS no puede estar vacío.')
@@ -78,7 +80,7 @@ export async function reproducirAnuncioSoporte(
       }
       await ejecutarConParticipantesSilenciados(
         [...canal.members.values()],
-        () => reproducirEnConexion(conexion!, textoSeguro),
+        () => reproducirEnConexion(conexion!, textoSeguro, registrarAudioBot),
       )
     })
   } finally {
@@ -157,6 +159,7 @@ async function encolarReproduccion(
 async function reproducirEnConexion(
   conexion: VoiceConnection,
   texto: string,
+  registrarAudioBot?: (rutaOgg: string, inicioMonotono: number) => Promise<void>,
 ): Promise<void> {
   if (!ffmpegPath) throw new Error('FFmpeg no está disponible para preparar el audio TTS.')
 
@@ -165,6 +168,7 @@ async function reproducirEnConexion(
   const rutaOgg = join(directorio, 'anuncio.ogg')
   const reproductor = createAudioPlayer()
   let cancelarSuscripcion: (() => void) | undefined
+  let inicioReproduccion: number | undefined
 
   try {
     const sintetizador = new EdgeTTS({
@@ -217,6 +221,11 @@ async function reproducirEnConexion(
     const errorReproductor = new Promise<never>((_resolve, reject) => {
       reproductor.once('error', reject)
     })
+    reproductor.on('stateChange', (_anterior, siguiente) => {
+      if (siguiente.status === AudioPlayerStatus.Playing && inicioReproduccion === undefined) {
+        inicioReproduccion = performance.now()
+      }
+    })
 
     reproductor.play(createAudioResource(createReadStream(rutaOgg), {
       inputType: StreamType.OggOpus,
@@ -226,10 +235,19 @@ async function reproducirEnConexion(
       entersState(reproductor, AudioPlayerStatus.Playing, 10_000),
       errorReproductor,
     ])
+    let errorRegistroBot: unknown
+    try {
+      await registrarAudioBot?.(rutaOgg, inicioReproduccion ?? performance.now())
+    } catch (error) {
+      errorRegistroBot = error
+    }
     await Promise.race([
       entersState(reproductor, AudioPlayerStatus.Idle, timeoutReproduccionMs),
       errorReproductor,
     ])
+    if (errorRegistroBot) {
+      throw new Error('No se pudo conservar la voz del bot en la grabación.', { cause: errorRegistroBot })
+    }
   } finally {
     reproductor.stop(true)
     cancelarSuscripcion?.()

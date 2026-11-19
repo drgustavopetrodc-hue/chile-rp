@@ -10,7 +10,7 @@ import type { Guild, VoiceChannel } from 'discord.js'
 import { randomUUID } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
 import { constants as fsConstants } from 'node:fs'
-import { mkdir, open, readFile, readdir, rename, rm, stat, statfs } from 'node:fs/promises'
+import { copyFile, mkdir, open, readFile, readdir, rename, rm, stat, statfs } from 'node:fs/promises'
 import { join, resolve, sep, isAbsolute } from 'node:path'
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
@@ -38,6 +38,16 @@ export interface ArchivoPistaGrabacion {
   archivo: string
 }
 
+export interface AudioBotGrabacion {
+  archivo: string
+  inicioMs: number
+}
+
+export interface AudioBotMezcla {
+  path: string
+  inicioMs: number
+}
+
 export interface MensajeGrabacionLog {
   canalId: string
   mensajeId: string
@@ -55,6 +65,7 @@ export interface ManifiestoGrabacionSoporte {
   consentimientos: ConsentimientoGrabacion[]
   mezcla: string | null
   pistas: ArchivoPistaGrabacion[]
+  audiosBot?: AudioBotGrabacion[]
   mensajesLog: MensajeGrabacionLog[]
 }
 
@@ -239,6 +250,7 @@ export class GrabadorSoporte {
   readonly conexion: VoiceConnection
   private readonly flujoPorUsuario = new Map<string, PistaActiva>()
   private readonly pistaPorUsuario = new Map<string, CodificadorPista>()
+  private readonly operacionesAudioBot = new Set<Promise<void>>()
   private readonly conexionError: (error: Error) => void
   private readonly primerPaquete: (discordId: string) => void | Promise<void>
   private readonly retencionDiasConfigurada: number
@@ -318,6 +330,7 @@ export class GrabadorSoporte {
       consentimientos,
       mezcla: null,
       pistas: [],
+      audiosBot: [],
       mensajesLog: [],
     }
     const grabador = new GrabadorSoporte(
@@ -355,6 +368,45 @@ export class GrabadorSoporte {
   async actualizarEstado(estado: EstadoGrabacionSoporte): Promise<void> {
     this.manifiesto.estado = estado
     await guardarManifiestoGrabacion(resolve(this.directorio, '..'), this.manifiesto)
+  }
+
+  async registrarAudioBot(rutaFuente: string, inicioMonotono: number): Promise<void> {
+    const inicioGrabacion = this.inicioMonotono
+    if (!this.estaCapturando || inicioGrabacion === undefined) return
+    if (!Number.isFinite(inicioMonotono)) {
+      throw new Error('El instante de inicio del audio del bot no es válido.')
+    }
+
+    const indice = (this.manifiesto.audiosBot?.length ?? 0) + this.operacionesAudioBot.size + 1
+    const archivo = `voz-bot-${indice}.ogg`
+    const temporal = join(this.directorio, `${archivo}.part`)
+    const operacion = (async () => {
+      try {
+        await this.verificarEspacio()
+        await copyFile(rutaFuente, temporal)
+        await verificarOgg(temporal)
+        await rename(temporal, join(this.directorio, archivo))
+        this.manifiesto.audiosBot = [
+          ...(this.manifiesto.audiosBot ?? []),
+          {
+            archivo,
+            inicioMs: Math.max(0, Math.floor(inicioMonotono - inicioGrabacion)),
+          },
+        ]
+        await guardarManifiestoGrabacion(resolve(this.directorio, '..'), this.manifiesto)
+      } catch (error) {
+        await rm(temporal, { force: true }).catch((errorLimpieza: unknown) => {
+          console.error(`[Soporte ${this.manifiesto.soporteId}] No se pudo limpiar el audio temporal del bot:`, errorLimpieza)
+        })
+        throw error
+      }
+    })()
+    this.operacionesAudioBot.add(operacion)
+    void operacion.then(
+      () => this.operacionesAudioBot.delete(operacion),
+      () => this.operacionesAudioBot.delete(operacion),
+    )
+    await operacion
   }
 
   async iniciarCaptura(discordIds: readonly string[]): Promise<void> {
@@ -410,6 +462,7 @@ export class GrabadorSoporte {
       ))
     const pistas: Array<{ discordId: string; path: string }> = []
     try {
+      await Promise.all([...this.operacionesAudioBot])
       for (const pista of this.pistaPorUsuario.values()) {
         await pista.cola
         await this.escribirHasta(pista, muestraFin)
@@ -425,9 +478,13 @@ export class GrabadorSoporte {
       }
 
       if (pistas.length === 0) {
+        for (const { archivo } of this.manifiesto.audiosBot ?? []) {
+          await rm(join(this.directorio, archivo), { force: true })
+        }
         this.manifiesto.estado = 'NO DISPONIBLE'
         this.manifiesto.mezcla = null
         this.manifiesto.pistas = []
+        this.manifiesto.audiosBot = []
         this.manifiesto.finalizadaEn = new Date().toISOString()
         this.manifiesto.venceEn = null
         await guardarManifiestoGrabacion(resolve(this.directorio, '..'), this.manifiesto)
@@ -436,7 +493,11 @@ export class GrabadorSoporte {
 
       const mezclaPath = join(this.directorio, 'mezcla.ogg')
       const mezclaTemporal = `${mezclaPath}.part`
-      await mezclarPistas(pistas.map((pista) => pista.path), mezclaTemporal)
+      const audiosBot = (this.manifiesto.audiosBot ?? []).map(({ archivo, inicioMs }) => ({
+        path: join(this.directorio, archivo),
+        inicioMs,
+      }))
+      await mezclarPistas(pistas.map((pista) => pista.path), mezclaTemporal, audiosBot)
       await verificarOgg(mezclaTemporal)
       await rename(mezclaTemporal, mezclaPath)
       this.manifiesto.estado = 'FINALIZADA'
@@ -456,12 +517,16 @@ export class GrabadorSoporte {
         await rm(pista.temporal, { force: true }).catch(() => undefined)
         await rm(pista.final, { force: true }).catch(() => undefined)
       }
+      for (const { archivo } of this.manifiesto.audiosBot ?? []) {
+        await rm(join(this.directorio, archivo), { force: true }).catch(() => undefined)
+      }
       await rm(join(this.directorio, 'mezcla.ogg.part'), { force: true }).catch(() => undefined)
       this.manifiesto.estado = 'ERROR'
       this.manifiesto.finalizadaEn = new Date().toISOString()
       this.manifiesto.venceEn = null
       this.manifiesto.mezcla = null
       this.manifiesto.pistas = []
+      this.manifiesto.audiosBot = []
       await guardarManifiestoGrabacion(resolve(this.directorio, '..'), this.manifiesto)
       throw error
     }
@@ -676,7 +741,8 @@ export async function recuperarManifiestosInterrumpidos(
         archivo.endsWith('.part') ||
         archivo.endsWith('.tmp') ||
         archivo === 'mezcla.ogg' ||
-        /^participante-\d{17,20}\.ogg$/.test(archivo)
+        /^participante-\d{17,20}\.ogg$/.test(archivo) ||
+        /^voz-bot-\d+\.ogg$/.test(archivo)
       ) {
         await rm(join(directorio, archivo), { force: true })
       }
@@ -686,6 +752,7 @@ export async function recuperarManifiestosInterrumpidos(
     manifiesto.venceEn = null
     manifiesto.mezcla = null
     manifiesto.pistas = []
+    manifiesto.audiosBot = []
     await guardarManifiestoGrabacion(directorioRaiz, manifiesto)
     recuperados.push(manifiesto)
   }
@@ -721,6 +788,7 @@ export async function eliminarContenidoAudioGrabacion(
   const archivos = [
     ...(manifiesto.mezcla ? [manifiesto.mezcla] : []),
     ...manifiesto.pistas.map(({ archivo }) => archivo),
+    ...(manifiesto.audiosBot ?? []).map(({ archivo }) => archivo),
   ]
   for (const archivo of archivos) {
     const ruta = obtenerRutaArchivoGrabacion(directorioRaiz, manifiesto.soporteId, archivo)
@@ -728,6 +796,7 @@ export async function eliminarContenidoAudioGrabacion(
   }
   manifiesto.mezcla = null
   manifiesto.pistas = []
+  manifiesto.audiosBot = []
 }
 
 export function obtenerRutaArchivoGrabacion(
@@ -735,7 +804,11 @@ export function obtenerRutaArchivoGrabacion(
   soporteId: string,
   archivo: string,
 ): string {
-  if (archivo !== 'mezcla.ogg' && !/^participante-\d{17,20}\.ogg$/.test(archivo)) {
+  if (
+    archivo !== 'mezcla.ogg' &&
+    !/^participante-\d{17,20}\.ogg$/.test(archivo) &&
+    !/^voz-bot-\d+\.ogg$/.test(archivo)
+  ) {
     throw new Error('El archivo solicitado no pertenece al formato de grabación.')
   }
   const base = rutaDirectorioGrabacion(directorioRaiz, soporteId)
@@ -764,18 +837,35 @@ export async function existeArchivoCompleto(ruta: string): Promise<boolean> {
   }
 }
 
-export async function mezclarPistas(archivos: string[], salida: string): Promise<void> {
+export async function mezclarPistas(
+  archivos: string[],
+  salida: string,
+  audiosBot: AudioBotMezcla[] = [],
+): Promise<void> {
   if (archivos.length === 0) throw new Error('No existen pistas de audio para mezclar.')
   const ejecutable = ffmpegPath
   if (!ejecutable) throw new Error('No se encontró el ejecutable de FFmpeg.')
-  const entradas = archivos.flatMap((archivo) => ['-i', archivo])
-  const fuentes = archivos.map((_archivo, indice) => `[${indice}:a]`).join('')
-  const filtro = `${fuentes}amix=inputs=${archivos.length}:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=0.95[salida]`
+  if (audiosBot.some(({ inicioMs }) => !Number.isSafeInteger(inicioMs) || inicioMs < 0)) {
+    throw new Error('Los desplazamientos de audio del bot deben ser milisegundos enteros no negativos.')
+  }
+  const entradasParticipantes = archivos.flatMap((archivo) => ['-i', archivo])
+  const entradasBot = audiosBot.flatMap(({ path }) => ['-i', path])
+  const cantidadEntradas = archivos.length + audiosBot.length
+  const fuentesParticipantes = archivos.map((_archivo, indice) => `[${indice}:a]`).join('')
+  const filtrosBot = audiosBot.map(({ inicioMs }, indice) => {
+    const entrada = archivos.length + indice
+    return `[${entrada}:a]adelay=${inicioMs}:all=1[vozbot${indice}]`
+  })
+  const fuentesBot = audiosBot.map((_audio, indice) => `[vozbot${indice}]`).join('')
+  const filtroMezcla =
+    `${fuentesParticipantes}${fuentesBot}amix=inputs=${cantidadEntradas}:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=0.95[salida]`
+  const filtro = [...filtrosBot, filtroMezcla].join(';')
   await ejecutarFfmpeg([
     '-hide_banner',
     '-loglevel', 'error',
     '-y',
-    ...entradas,
+    ...entradasParticipantes,
+    ...entradasBot,
     '-filter_complex', filtro,
     '-map', '[salida]',
     '-vn',
@@ -859,6 +949,8 @@ function esManifiestoGrabacion(valor: unknown): valor is ManifiestoGrabacionSopo
     (manifiesto.mezcla === null || manifiesto.mezcla === 'mezcla.ogg') &&
     Array.isArray(manifiesto.pistas) &&
     manifiesto.pistas.every(esPista) &&
+    (manifiesto.audiosBot === undefined ||
+      (Array.isArray(manifiesto.audiosBot) && manifiesto.audiosBot.every(esAudioBot))) &&
     Array.isArray(manifiesto.mensajesLog) &&
     manifiesto.mensajesLog.every(esMensajeLog)
 }
@@ -892,6 +984,16 @@ function esPista(valor: unknown): valor is ArchivoPistaGrabacion {
   return esSnowflake(pista.discordId) &&
     typeof pista.archivo === 'string' &&
     /^participante-\d{17,20}\.ogg$/.test(pista.archivo)
+}
+
+function esAudioBot(valor: unknown): valor is AudioBotGrabacion {
+  if (!valor || typeof valor !== 'object' || Array.isArray(valor)) return false
+  const audio = valor as Record<string, unknown>
+  return typeof audio.archivo === 'string' &&
+    /^voz-bot-\d+\.ogg$/.test(audio.archivo) &&
+    Number.isSafeInteger(audio.inicioMs) &&
+    typeof audio.inicioMs === 'number' &&
+    audio.inicioMs >= 0
 }
 
 function esMensajeLog(valor: unknown): valor is MensajeGrabacionLog {
