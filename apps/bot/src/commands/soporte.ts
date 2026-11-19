@@ -851,8 +851,7 @@ async function crearSoporte(
     }
 
     try {
-      const puedeMover = bot.permissions.has(PermissionFlagsBits.MoveMembers) &&
-        bot.permissionsIn(canalVoz).has(PermissionFlagsBits.MoveMembers) &&
+      const puedeMover = bot.permissionsIn(canalVoz).has(PermissionFlagsBits.MoveMembers) &&
         bot.permissionsIn(miembro.voice.channel).has(PermissionFlagsBits.MoveMembers)
       if (!puedeMover) {
         registro.movimientos.push({ usuarioId, resultado: 'SIN_PERMISOS', error: null })

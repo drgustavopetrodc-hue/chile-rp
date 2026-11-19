@@ -114,9 +114,12 @@ test('los overwrites de voz y evidencias niegan @everyone y comparten los mismos
   )
 
   const permisosTextoUsuario = evidencias.find((overwrite) => overwrite.id === 'reporter-user')
+  const permisosBotVoz = voz.find((overwrite) => overwrite.id === 'bot')
   assert.ok(permisosTextoUsuario?.allow.includes(PermissionFlagsBits.AttachFiles))
   assert.ok(permisosTextoUsuario?.allow.includes(PermissionFlagsBits.EmbedLinks))
   assert.ok(permisosTextoUsuario?.allow.includes(PermissionFlagsBits.SendMessages))
+  assert.ok(permisosBotVoz?.allow.includes(PermissionFlagsBits.MuteMembers))
+  assert.ok(permisosBotVoz?.allow.includes(PermissionFlagsBits.MoveMembers))
   assert.ok(
     voz.find((overwrite) => overwrite.id === 'reporter-user')?.allow.includes(PermissionFlagsBits.Connect),
   )

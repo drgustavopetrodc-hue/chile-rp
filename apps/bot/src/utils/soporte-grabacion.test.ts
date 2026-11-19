@@ -13,6 +13,7 @@ import {
   leerManifiestoGrabacion,
   listarManifiestosVencidos,
   mezclarPistas,
+  planificarPaquetePcm,
   recuperarManifiestosInterrumpidos,
   rutaDirectorioGrabacion,
   todosAceptaronConsentimiento,
@@ -31,6 +32,22 @@ test('exige consentimiento individual de cada participante', () => {
     actualizadoEn: new Date().toISOString(),
   })
   assert.equal(todosAceptaronConsentimiento(consentimientos), false)
+})
+
+test('conserva el paquete PCM completo cuando llega antes por jitter de red', () => {
+  const pcm = Buffer.alloc(960 * 4)
+  const plan = planificarPaquetePcm(pcm, 1_920, 1_680)
+
+  assert.equal(plan.muestrasSilencio, 0)
+  assert.equal(plan.cursorSiguiente, 2_880)
+})
+
+test('mantiene silencio de alineación sin recortar el paquete PCM', () => {
+  const pcm = Buffer.alloc(960 * 4)
+  const plan = planificarPaquetePcm(pcm, 1_920, 2_400)
+
+  assert.equal(plan.muestrasSilencio, 480)
+  assert.equal(plan.cursorSiguiente, 3_360)
 })
 
 test('solo acepta rutas de grabación dentro de un punto de montaje no raíz', () => {

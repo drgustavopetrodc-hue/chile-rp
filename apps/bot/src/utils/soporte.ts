@@ -131,7 +131,9 @@ export function crearPermisosCanalSoporte(
   const permitirBot = [
     ...(tipo === 'voz' ? permitirVoz : permitirTexto),
     PermissionFlagsBits.ManageChannels,
-    ...(tipo === 'voz' ? [PermissionFlagsBits.MoveMembers] : []),
+    ...(tipo === 'voz'
+      ? [PermissionFlagsBits.MoveMembers, PermissionFlagsBits.MuteMembers]
+      : []),
   ]
   const permitirParticipante = tipo === 'voz' ? permitirVoz : permitirTexto
   const entradas = new Map<string, { allow: Set<bigint>; deny: Set<bigint> }>()

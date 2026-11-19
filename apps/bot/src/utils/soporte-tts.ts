@@ -8,6 +8,7 @@ import {
   joinVoiceChannel,
 } from '@discordjs/voice'
 import type { VoiceConnection } from '@discordjs/voice'
+import { PermissionFlagsBits } from 'discord.js'
 import type { VoiceChannel } from 'discord.js'
 import { EdgeTTS } from 'node-edge-tts'
 import { createReadStream } from 'node:fs'
@@ -70,9 +71,71 @@ export async function reproducirAnuncioSoporte(
 
   try {
     await entersState(conexion, VoiceConnectionStatus.Ready, timeoutConexionMs)
-    await encolarReproduccion(conexion, async () => reproducirEnConexion(conexion!, textoSeguro))
+    await encolarReproduccion(conexion, async () => {
+      const bot = await canal.guild.members.fetchMe()
+      if (!bot.permissionsIn(canal).has(PermissionFlagsBits.MuteMembers)) {
+        throw new Error('El bot necesita permiso para silenciar miembros durante los anuncios de soporte.')
+      }
+      await ejecutarConParticipantesSilenciados(
+        [...canal.members.values()],
+        () => reproducirEnConexion(conexion!, textoSeguro),
+      )
+    })
   } finally {
     if (conexionPropia) conexion.destroy()
+  }
+}
+
+export interface ParticipanteSilenciable {
+  id: string
+  user: { bot: boolean }
+  voice: {
+    serverMute: boolean | null
+    setMute(muted: boolean, reason?: string): Promise<unknown>
+  }
+}
+
+export async function ejecutarConParticipantesSilenciados(
+  miembros: readonly ParticipanteSilenciable[],
+  reproducir: () => Promise<void>,
+): Promise<void> {
+  const silenciados: ParticipanteSilenciable[] = []
+  const errores: unknown[] = []
+  const miembrosQueDebenSilenciarse = [...new Map(
+    miembros
+      .filter((miembro) => !miembro.user.bot && miembro.voice.serverMute !== true)
+      .map((miembro) => [miembro.id, miembro]),
+  ).values()]
+  const resultadosSilencio = await Promise.allSettled(
+    miembrosQueDebenSilenciarse.map(async (miembro) => {
+      await miembro.voice.setMute(true, 'Anuncio de voz del soporte institucional')
+      silenciados.push(miembro)
+    }),
+  )
+  errores.push(...resultadosSilencio.flatMap((resultado) =>
+    resultado.status === 'rejected' ? [resultado.reason] : [],
+  ))
+
+  if (errores.length === 0) {
+    try {
+      await reproducir()
+    } catch (error) {
+      errores.push(error)
+    }
+  }
+
+  const resultadosRestauracion = await Promise.allSettled(
+    silenciados.map((miembro) =>
+      miembro.voice.setMute(false, 'Finalizó el anuncio de voz del soporte institucional'),
+    ),
+  )
+  errores.push(...resultadosRestauracion.flatMap((resultado) =>
+    resultado.status === 'rejected' ? [resultado.reason] : [],
+  ))
+
+  if (errores.length === 1) throw errores[0]
+  if (errores.length > 1) {
+    throw new AggregateError(errores, 'No se pudo completar el anuncio o restaurar el audio de todos los miembros.')
   }
 }
 

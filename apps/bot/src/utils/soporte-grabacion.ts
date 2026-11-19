@@ -87,6 +87,22 @@ const espacioMinimoBytes = 128 * 1024 * 1024
 export const limitePistasGrabacion = 10
 const duracionEsperaVozMs = 20_000
 
+export function planificarPaquetePcm(
+  pcm: Buffer,
+  cursorMuestras: number,
+  muestraObjetivo: number,
+): { muestrasSilencio: number; cursorSiguiente: number } {
+  const muestrasPcm = pcm.length / bytesPorMuestra
+  if (!Number.isInteger(muestrasPcm)) {
+    throw new Error('El paquete PCM no contiene muestras completas.')
+  }
+  const muestrasSilencio = Math.max(0, muestraObjetivo - cursorMuestras)
+  return {
+    muestrasSilencio,
+    cursorSiguiente: cursorMuestras + muestrasSilencio + muestrasPcm,
+  }
+}
+
 export function crearConsentimientosPendientes(
   discordIds: readonly string[],
   ahora = new Date().toISOString(),
@@ -563,23 +579,11 @@ export class GrabadorSoporte {
     const muestraObjetivo = Math.max(0, Math.floor(
       ((recibidoEn - inicioMonotono) * muestrasPorSegundo) / 1000,
     ))
-    await this.escribirHasta(pista, muestraObjetivo)
+    const plan = planificarPaquetePcm(pcm, pista.cursorMuestras, muestraObjetivo)
+    await this.escribirHasta(pista, pista.cursorMuestras + plan.muestrasSilencio)
     if (!this.capturaActiva || this.finalizando) return
-    const muestrasPcm = pcm.length / bytesPorMuestra
-    if (muestraObjetivo < pista.cursorMuestras) {
-      const solapamiento = Math.min(
-        muestrasPcm,
-        pista.cursorMuestras - muestraObjetivo,
-      )
-      const offset = solapamiento * bytesPorMuestra
-      if (offset < pcm.length) {
-        await escribirBuffer(pista.entrada, pcm.subarray(offset))
-        pista.cursorMuestras += muestrasPcm - solapamiento
-      }
-    } else {
-      await escribirBuffer(pista.entrada, pcm)
-      pista.cursorMuestras += muestrasPcm
-    }
+    await escribirBuffer(pista.entrada, pcm)
+    pista.cursorMuestras = plan.cursorSiguiente
     pista.paquetes += 1
     if (!this.manifiesto.iniciadaEn) this.manifiesto.iniciadaEn = new Date().toISOString()
     if (!this.capturaActiva || this.finalizando) return
