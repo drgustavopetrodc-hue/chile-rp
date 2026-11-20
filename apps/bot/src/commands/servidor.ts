@@ -102,7 +102,20 @@ async function ejecutarApertura(i: ChatInputCommandInteraction) {
     const favor = [...votos.values()].filter(Boolean).length
     const contra = votos.size - favor
     const abierto = motivo === 'meta' && favor >= meta
-    if (abierto) await guardarEstado(true, 'Votación aprobada')
+    if (abierto) {
+      await guardarEstado(true, 'Votación aprobada')
+      const guild = i.guild
+      const canalAnuncios = guild
+        ? await obtenerCanalAnuncios(guild, process.env.CANAL_ANUNCIOS_ID ?? mensaje.channelId)
+        : null
+      if (!canalAnuncios) {
+        console.error('[Servidor] La votación aprobó la apertura, pero no se encontró un canal de anuncios con permisos.')
+      } else {
+        await publicarAnuncioApertura(canalAnuncios).catch((error: unknown) => {
+          console.error('[Servidor] La votación aprobó la apertura, pero no se pudo publicar el anuncio:', error)
+        })
+      }
+    }
     await mensaje.edit({
       components: [crearContainerVotacionApertura(
         meta,
@@ -182,27 +195,10 @@ async function cambiarEstado(i: ChatInputCommandInteraction, abierto: boolean) {
     const guild = i.guild
     if (!guild) return i.reply({ content: 'Usa este comando dentro del servidor.', flags: efimero })
     const canalId = process.env.CANAL_ANUNCIOS_ID ?? i.channelId
-    const canal = await guild.channels.fetch(canalId).catch((error: unknown) => {
-      console.error(`[Servidor] No se pudo obtener el canal de anuncios ${canalId}:`, error)
-      return null
-    })
-    if (!canal || (canal.type !== ChannelType.GuildText && canal.type !== ChannelType.GuildAnnouncement)) {
+    canalAnuncios = await obtenerCanalAnuncios(guild, canalId)
+    if (!canalAnuncios) {
       return i.reply({
         content: 'No se pudo publicar el anuncio: configura un canal de anuncios válido o ejecuta /abrir en un canal de texto.',
-        flags: efimero,
-      })
-    }
-    canalAnuncios = canal
-
-    const bot = await guild.members.fetchMe()
-    const permisos = bot.permissionsIn(canalAnuncios)
-    if (
-      !permisos.has(PermissionFlagsBits.ViewChannel) ||
-      !permisos.has(PermissionFlagsBits.SendMessages) ||
-      !permisos.has(PermissionFlagsBits.AttachFiles)
-    ) {
-      return i.reply({
-        content: 'No se pudo publicar el anuncio: necesito permisos para ver el canal, enviar mensajes y adjuntar archivos.',
         flags: efimero,
       })
     }
@@ -210,25 +206,8 @@ async function cambiarEstado(i: ChatInputCommandInteraction, abierto: boolean) {
 
   await guardarEstado(abierto, `Actualizado por ${i.user.tag}`)
   if (abierto && canalAnuncios) {
-    const embed = crearEmbed(
-      '¡Nueva sesión abierta!',
-      '¡Ya estamos en sesión! 🎉 El servidor está abierto para que entres, roles y armes tu propia historia con la comunidad. 🇨🇱\n\n' +
-        'Antes de entrar, recuerda lo básico: respeta a los demás, mantén el rol y sigue las indicaciones del staff. Así todos disfrutamos una buena sesión.\n\n' +
-        '🔥 ¡Junta a tus amigos y entra a rolear!',
-      coloresEmbed.exito,
-    )
-      .addFields({
-        name: 'Información',
-        value: '🟢 Estado: **Abierto**\n🇨🇱 Comunidad: **RP Chile**',
-      })
-      .setImage(`attachment://${nombreImagenApertura}`)
-
     try {
-      await canalAnuncios.send({
-        embeds: [embed],
-        files: [new AttachmentBuilder(imagenApertura, { name: nombreImagenApertura })],
-        allowedMentions: { parse: [] },
-      })
+      await publicarAnuncioApertura(canalAnuncios)
     } catch (error) {
       console.error('[Servidor] Se marcó abierto, pero no se pudo publicar el anuncio:', error)
       return i.reply({
@@ -239,6 +218,61 @@ async function cambiarEstado(i: ChatInputCommandInteraction, abierto: boolean) {
   }
 
   return i.reply({ content: abierto ? 'El servidor quedó marcado como abierto.' : 'El servidor quedó marcado como cerrado.', flags: efimero })
+}
+
+async function obtenerCanalAnuncios(
+  guild: NonNullable<ChatInputCommandInteraction['guild']>,
+  canalId: string,
+): Promise<TextChannel | NewsChannel | null> {
+  const canal = await guild.channels.fetch(canalId).catch((error: unknown) => {
+    console.error(`[Servidor] No se pudo obtener el canal de anuncios ${canalId}:`, error)
+    return null
+  })
+  if (!canal || (canal.type !== ChannelType.GuildText && canal.type !== ChannelType.GuildAnnouncement)) {
+    return null
+  }
+
+  const bot = await guild.members.fetchMe()
+  const permisos = bot.permissionsIn(canal)
+  if (
+    !permisos.has(PermissionFlagsBits.ViewChannel) ||
+    !permisos.has(PermissionFlagsBits.SendMessages) ||
+    !permisos.has(PermissionFlagsBits.AttachFiles)
+  ) return null
+  return canal
+}
+
+async function publicarAnuncioApertura(canal: TextChannel | NewsChannel) {
+  return canal.send({
+    components: [crearContainerAnuncioApertura()],
+    flags: MessageFlags.IsComponentsV2,
+    files: [new AttachmentBuilder(imagenApertura, { name: nombreImagenApertura })],
+    allowedMentions: { parse: [] },
+  })
+}
+
+function crearContainerAnuncioApertura(): ContainerBuilder {
+  return new ContainerBuilder()
+    .setAccentColor(coloresEmbed.exito)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent('**REPÚBLICA DE CHILE · ROLEPLAY**'))
+    .addSeparatorComponents(
+      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+    )
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      '## ¡Nueva sesión abierta!\n\n' +
+      '¡Ya estamos en sesión! 🎉 El servidor está abierto para que entres, roles y armes tu propia historia con la comunidad. 🇨🇱\n\n' +
+      'Antes de entrar, recuerda lo básico: respeta a los demás, mantén el rol y sigue las indicaciones del staff. Así todos disfrutamos una buena sesión.\n\n' +
+      '🔥 ¡Junta a tus amigos y entra a rolear!',
+    ))
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      '### Información\n🟢 Estado: **Abierto**\n🇨🇱 Comunidad: **RP Chile**',
+    ))
+    .addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL(`attachment://${nombreImagenApertura}`),
+      ),
+    )
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent('-# RP Chile · Sistema del servidor'))
 }
 
 async function ejecutarCierre(i: ChatInputCommandInteraction) {
