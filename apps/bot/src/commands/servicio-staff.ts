@@ -739,6 +739,20 @@ async function finalizarGrabacionAsistencia(
   ))
 }
 
+async function editarRespuestaFinalizacion(i: ButtonInteraction, contenido: string): Promise<void> {
+  try {
+    await i.editReply(contenido)
+  } catch (error) {
+    const codigo = (error as { code?: number }).code
+    if (codigo !== 10008) {
+      console.error('[Servicio Staff] No se pudo editar la respuesta de finalización:', error)
+    }
+    await i.followUp({ content: contenido, flags: MessageFlags.Ephemeral }).catch((errorAlternativo: unknown) => {
+      console.error('[Servicio Staff] No se pudo enviar la respuesta alternativa de finalización:', errorAlternativo)
+    })
+  }
+}
+
 async function finalizarServicioDesdePanel(
   i: ButtonInteraction,
   servicio: NonNullable<Awaited<ReturnType<typeof obtenerServicioStaff>>>,
@@ -832,8 +846,6 @@ async function finalizarServicioDesdePanel(
       mensajeInforme = await canalInforme.send({
         embeds: [embed],
         allowedMentions: { parse: [] },
-        nonce: actualizado.id,
-        enforceNonce: true,
       })
       await guardarInformeServicioStaff(actualizado.id, canalInforme.id, mensajeInforme.id)
     }
@@ -846,11 +858,11 @@ async function finalizarServicioDesdePanel(
       }
     }
     await actualizarPanelPorId(i.client, actualizado.id)
-    await i.editReply(`Servicio finalizado. El informe institucional quedó publicado en <#${canalInforme.id}>.`)
+    await editarRespuestaFinalizacion(i, `Servicio finalizado. El informe institucional quedó publicado en <#${canalInforme.id}>.`)
   } catch (error) {
     console.error(`[Servicio Staff ${servicio.id}] No se pudo finalizar o publicar el informe:`, error)
     await actualizarPanelPorId(i.client, servicio.id)
-    await i.editReply('No se pudo completar la finalización. El servicio quedó pendiente para reintentar; revisa los logs del bot.')
+    await editarRespuestaFinalizacion(i, 'No se pudo completar la finalización. El servicio quedó pendiente para reintentar; revisa los logs del bot.')
   } finally {
     finalizacionesEnCurso.delete(servicio.id)
   }

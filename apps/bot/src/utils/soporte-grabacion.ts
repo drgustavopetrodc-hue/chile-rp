@@ -97,7 +97,7 @@ const muestrasPorSegundo = frecuencia
 const muestrasSilencio = frecuencia
 const espacioMinimoBytes = 128 * 1024 * 1024
 export const limitePistasGrabacion = 10
-const duracionEsperaVozMs = 20_000
+const duracionEsperaVozMs = 45_000
 
 export function planificarPaquetePcm(
   pcm: Buffer,
@@ -283,6 +283,10 @@ export class GrabadorSoporte {
     this.retencionDiasConfigurada = retencionDias
     this.conexionError = conexionError
     this.primerPaquete = primerPaquete
+    this.conexion.on('error', (error) => {
+      if (this.finalizando) return
+      this.conexionError(error)
+    })
     this.conexion.on('stateChange', (_anterior, siguiente) => {
       if (this.finalizando || siguiente.status !== VoiceConnectionStatus.Disconnected) return
       this.capturaActiva = false
