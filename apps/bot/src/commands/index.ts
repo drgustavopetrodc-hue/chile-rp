@@ -25,10 +25,11 @@ import { ia } from './ia'
 import { expedientes } from './expedientes'
 import { soporte } from './soporte'
 import { grabacionDirecta } from './grabacion-directa'
+import { servicioStaff } from './servicio-staff'
 
 interface Comando {
   data: Pick<SlashCommandBuilder, 'name' | 'toJSON'>
   execute: (i: ChatInputCommandInteraction) => Promise<unknown>
 }
 
-export const comandos: Comando[] = [panelVerificacion, verificacion, cedula, crearDni2do, ...legales, ...moderacion, ...comunidad, soporte, ...grabacionDirecta, ...economia, casino, ...vehiculos, item, sueldo, ...instituciones, ...servidor, staff, contenido, agregarDinero, bienvenida, ...comandosConfiguracion, ...owner, ...ownerManagement, codigoPenal, ia, expedientes]
+export const comandos: Comando[] = [panelVerificacion, verificacion, cedula, crearDni2do, ...legales, ...moderacion, ...comunidad, soporte, servicioStaff, ...grabacionDirecta, ...economia, casino, ...vehiculos, item, sueldo, ...instituciones, ...servidor, staff, contenido, agregarDinero, bienvenida, ...comandosConfiguracion, ...owner, ...ownerManagement, codigoPenal, ia, expedientes]

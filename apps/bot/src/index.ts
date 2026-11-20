@@ -8,6 +8,12 @@ import { manejarConfirmacionAdministrativa } from './commands/ia-administracion'
 import { asegurarUsuario } from './utils/usuarios'
 import { enviarBienvenida } from './commands/bienvenida'
 import { manejarBotonTicket, manejarMensajeTicket, manejarModalTicket } from './commands/comunidad'
+import { manejarEstadoVozGrabacionDirecta } from './commands/grabacion-directa'
+import {
+  inicializarServiciosStaff,
+  manejarEstadoVozServicioStaff,
+  manejarInteraccionServicioStaff,
+} from './commands/servicio-staff'
 import {
   inicializarGrabacionesSoporte,
   manejarEstadoVozSoporte,
@@ -39,12 +45,21 @@ client.once(Events.ClientReady, async (c) => {
   await inicializarGrabacionesSoporte(client).catch((err) =>
     console.error('No se pudo inicializar la retención de grabaciones de soporte:', err),
   )
+  await inicializarServiciosStaff(client).catch((err) =>
+    console.error('No se pudieron recuperar los servicios Staff:', err),
+  )
   console.log(`Bot conectado como ${c.user.tag}`)
 })
 
 client.on(Events.VoiceStateUpdate, (anterior, nuevo) => {
   void manejarEstadoVozSoporte(anterior, nuevo).catch((error: unknown) => {
     console.error('No se pudo actualizar el consentimiento de voz de un soporte:', error)
+  })
+  void manejarEstadoVozGrabacionDirecta(anterior, nuevo).catch((error: unknown) => {
+    console.error('No se pudo avisar o añadir a un participante de una grabación directa:', error)
+  })
+  void manejarEstadoVozServicioStaff(anterior, nuevo).catch((error: unknown) => {
+    console.error('No se pudo actualizar el servicio Staff tras un cambio de voz:', error)
   })
 })
 
@@ -97,6 +112,11 @@ client.on(Events.InteractionCreate, async (i) => {
       await manejarBotonTicket(i)
     } else if (i.isButton() && i.customId.startsWith('ia-admin:')) {
       await manejarConfirmacionAdministrativa(i)
+    } else if (
+      (i.isButton() || i.isModalSubmit()) &&
+      i.customId.startsWith('servicio-staff:')
+    ) {
+      await manejarInteraccionServicioStaff(i)
     } else if (i.isModalSubmit() && i.customId.startsWith('ticketpanel:')) {
       await manejarModalTicket(i)
     } else if (

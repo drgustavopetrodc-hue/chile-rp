@@ -17,6 +17,7 @@ const comandosSiempre = new Set([
   'config', 'seguridad', 'staff', 'ticket-panel', 'panel-verificacion', 'verificacion', 'bienvenida',
   'apertura', 'abrir', 'cerrar', 'cierre', 'entorno', 'alerta', 'alerta-reglas', 'embed',
   'item', 'sueldo', 'institucion', 'contratar', 'database', 'agregar-presupuesto', 'soporte',
+  'iniciar-servicio-staff',
   'ck', 'auto-reaccionar', 'emoji', 'editar', 'eliminar', 'agregar',
 ])
 

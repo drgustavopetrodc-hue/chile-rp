@@ -54,7 +54,7 @@ export interface MensajeGrabacionLog {
 }
 
 export interface ManifiestoGrabacionSoporte {
-  origenGrabacion?: 'soporte' | 'directa'
+  origenGrabacion?: 'soporte' | 'directa' | 'servicio-staff'
   soporteId: string
   guildId: string
   estado: EstadoGrabacionSoporte
@@ -307,7 +307,7 @@ export class GrabadorSoporte {
       conexionError: (error: Error) => void
       primerPaquete: (discordId: string) => void | Promise<void>
     },
-    origenGrabacion: 'soporte' | 'directa' = 'soporte',
+    origenGrabacion: 'soporte' | 'directa' | 'servicio-staff' = 'soporte',
   ): Promise<GrabadorSoporte> {
     if (!Number.isInteger(retencionDias) || retencionDias < 1 || retencionDias > 3650) {
       throw new Error('SOPORTE_RETENCION_DIAS debe ser un entero entre 1 y 3650.')
@@ -945,7 +945,8 @@ function esManifiestoGrabacion(valor: unknown): valor is ManifiestoGrabacionSopo
     /^[\da-f-]{36}$/i.test(manifiesto.soporteId) &&
     (manifiesto.origenGrabacion === undefined ||
       manifiesto.origenGrabacion === 'soporte' ||
-      manifiesto.origenGrabacion === 'directa') &&
+      manifiesto.origenGrabacion === 'directa' ||
+      manifiesto.origenGrabacion === 'servicio-staff') &&
     esSnowflake(manifiesto.guildId) &&
     (manifiesto.estado === 'ESPERANDO CONSENTIMIENTO' ||
       manifiesto.estado === 'GRABANDO' ||

@@ -192,6 +192,33 @@ enum EstadoPostulacion {
   RECHAZADA
 }
 
+enum EstadoServicioStaff {
+  ESPERANDO_VOZ
+  ACTIVO
+  FINALIZANDO
+  FINALIZADO
+  CANCELADO
+}
+
+enum TipoActividadServicioStaff {
+  SOPORTE
+  MOVIMIENTO_VOZ
+}
+
+enum OrigenGrabacionServicioStaff {
+  ASISTENCIA_STAFF
+  SOPORTE
+}
+
+enum EstadoGrabacionServicioStaff {
+  PREPARANDO
+  GRABANDO
+  FINALIZADA
+  INTERRUMPIDA
+  ERROR
+  SIN_AUDIO
+}
+
 // ───────────────── USUARIOS Y VERIFICACIÓN ─────────────────
 
 model Usuario {
@@ -678,4 +705,67 @@ model MemoriaIA {
   @@index([guildId, channelId, usuarioId, creadoEn])
   @@index([creadoEn])
   @@map("memoria_ia")
+}
+
+model ServicioStaff {
+  id                    String               @id @default(uuid())
+  guildId               String
+  staffDiscordId        String
+  staffNombre           String
+  estado                EstadoServicioStaff  @default(ESPERANDO_VOZ)
+  claveActivo           String?              @unique
+  canalAsistenciaId     String
+  canalAvisoId          String
+  panelCanalId          String?
+  panelMensajeId        String?
+  informeCanalId        String?
+  informeMensajeId      String?
+  iniciadoEn            DateTime?
+  finalizadoEn          DateTime?
+  creadoEn              DateTime             @default(now())
+  actualizadoEn         DateTime             @updatedAt
+  actividades           ActividadServicioStaff[]
+  grabaciones           GrabacionServicioStaff[]
+
+  @@index([guildId, estado])
+  @@index([staffDiscordId, creadoEn])
+  @@map("servicios_staff")
+}
+
+model ActividadServicioStaff {
+  id               String                     @id @default(uuid())
+  servicioId       String
+  servicio         ServicioStaff              @relation(fields: [servicioId], references: [id], onDelete: Cascade)
+  tipo             TipoActividadServicioStaff
+  titulo           String
+  detalle          String?                    @db.Text
+  soporteId        String?                    @unique
+  canalAnteriorId  String?
+  canalNuevoId     String?
+  iniciadoEn       DateTime                   @default(now())
+  finalizadoEn     DateTime?
+  duracionMs       BigInt?
+  resultado        String?
+  grabaciones      GrabacionServicioStaff[]
+
+  @@index([servicioId, iniciadoEn])
+  @@map("actividades_servicio_staff")
+}
+
+model GrabacionServicioStaff {
+  id             String                        @id @default(uuid())
+  servicioId     String
+  servicio       ServicioStaff                 @relation(fields: [servicioId], references: [id], onDelete: Cascade)
+  actividadId    String?
+  actividad      ActividadServicioStaff?       @relation(fields: [actividadId], references: [id], onDelete: SetNull)
+  grabacionId    String
+  origen         OrigenGrabacionServicioStaff
+  estado         EstadoGrabacionServicioStaff  @default(PREPARANDO)
+  iniciadoEn     DateTime?
+  finalizadoEn   DateTime?
+  creadaEn       DateTime                      @default(now())
+
+  @@unique([servicioId, grabacionId])
+  @@index([servicioId, creadaEn])
+  @@map("grabaciones_servicio_staff")
 }

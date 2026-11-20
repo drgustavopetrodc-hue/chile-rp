@@ -70,6 +70,7 @@ test('persiste manifiestos, identifica vencimiento y recupera sesiones sin reanu
   const soporteId = '123e4567-e89b-12d3-a456-426614174000'
   try {
     const manifiesto = {
+      origenGrabacion: 'servicio-staff' as const,
       soporteId,
       guildId: '100000000000000001',
       estado: 'GRABANDO' as const,

@@ -89,7 +89,7 @@ El bot necesita un proceso siempre encendido (no sirve Vercel). Railway lo despl
    - **Build Command:** `npm run db:generate`
    - **Start Command:** `npm run bot:start`
 4. En **Variables** agrega las mismas del `.env` del bot: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_GUILD_ID`, `ROL_STAFF_ID`, `ROL_NO_VERIFICADO_ID`, `ROL_CIUDADANO_ID`, `CANAL_REVISION_ID`, `DATABASE_URL` y `DATABASE_URL_UNPOOLED`.
-5. Antes de desplegar cambios de esquema, respalda la base de datos y coordina la aprobación de la migración. Solo después de autorizarla, aplica las migraciones (`npm run deploy -w @rp-chile/db`) y genera el cliente (`npm run db:generate`). No ejecutes `migrate dev` contra producción. Las migraciones pendientes añaden memoria IA, expedientes y actuaciones administrativas, y el historial de tickets.
+5. Antes de desplegar cambios de esquema, respalda la base de datos y coordina la aprobación de la migración. Solo después de autorizarla, aplica las migraciones (`npm run deploy -w @rp-chile/db`) y genera el cliente (`npm run db:generate`). No ejecutes `migrate dev` contra producción. Las migraciones pendientes añaden memoria IA, expedientes y actuaciones administrativas, historial de tickets y servicios Staff.
 6. Cada `git push` a la rama principal vuelve a desplegar el bot automáticamente.
 
 Railway cobra por uso (CPU y memoria por segundo). Revisa el consumo en el panel y configura un límite de gasto.
@@ -105,11 +105,21 @@ El valor de 30 días es la política inicial aprobada y puede modificarse median
 
 Antes de grabar, cada participante humano —incluido quien abre el soporte— debe aceptar individualmente mediante el botón. Rechazar impide iniciar y retirar el consentimiento detiene la captura. Si entra alguien nuevo, la grabación se pausa hasta que consienta. El soporte puede continuar sin grabación.
 
-El staff también puede usar `/grabar` y `/parar-grabacion` en un canal de voz normal para una grabación independiente de los soportes. Todas las personas humanas presentes deben aceptar individualmente; si alguien rechaza o cambia la lista de participantes antes de comenzar, no se graba. Al detener, la mezcla se envía por DM a quien inició la grabación. Este flujo utiliza el mismo volumen persistente y la misma retención configurada; requiere que el bot pueda enviar archivos por mensaje privado.
+El staff también puede usar `/grabar` y `/parar-grabacion` en un canal de voz normal para una grabación independiente de los soportes. Antes de capturar audio, el bot publica un aviso y anuncia por TTS que se grabarán las voces presentes. Si alguien entra durante la captura, recibe un DM antes de añadir su pista; si no se puede enviar el DM o se alcanzó el límite de pistas, su audio no se incorpora. Al detener, la mezcla se envía por DM a quien inició la grabación. Este flujo utiliza el mismo volumen persistente y la misma retención configurada; requiere que el bot pueda enviar archivos por mensaje privado.
 
 Si un participante retira su consentimiento durante una captura, el bot detiene la grabación, cierra el soporte y registra el motivo en los logs de Moderación y Administración. Elimina automáticamente los canales de voz y evidencias solo cuando el retiro, el cierre y, si hubo grabación finalizada, sus archivos están registrados en todos los logs configurados; si falla una publicación o auditoría, conserva los canales para proteger el acceso a la evidencia.
 
 Los audios finalizados se publican en los canales configurados para logs de moderación y administración, únicamente si el bot comprueba que su lectura está limitada a Staff autorizado. Si la comprobación o la carga falla, el soporte continúa y el expediente conserva los identificadores de los adjuntos; no se anuncian como publicados. La eliminación por retención borra los archivos locales y los mensajes de audio publicados; los eventos de auditoría en la base de datos se conservan. Si la grabación no quedó disponible en ambos logs seguros, no se permite borrar los canales del expediente hasta resolverlo.
 
 El bot no reanuda una captura tras reiniciarse. La recepción requiere que pueda conectarse al canal y recibir paquetes de audio. Las pruebas automatizadas locales validan Opus, la mezcla de dos pistas y la reproducción Ogg, pero no validan conexiones reales de Discord ni la persistencia del volumen Railway. `ffmpeg-static` incorpora un binario FFmpeg bajo GPL-3.0-or-later; revisa sus obligaciones antes de redistribuir el bot o el binario.
+
+### Servicios del Staff
+
+`/iniciar-servicio-staff` registra el turno y espera a que el Staff entre a Asistencia Staff (`1571736084558258198`). Al ingresar, el bot publica un aviso en el canal de texto desde donde se ejecutó el comando, anuncia por TTS que se está grabando y comienza la captura. El panel de control y el contador se envían por DM; desde ese panel se puede finalizar el servicio o iniciar un soporte. Mientras espera el ingreso, el usuario puede cancelar la solicitud desde el mismo panel.
+
+El botón «Iniciar soporte» abre un formulario privado que recibe menciones o IDs de usuario separados por comas. Reutiliza el creador, permisos, canales, grabación consentida y cierre del sistema `/soporte`; no crea un flujo paralelo. Los soportes abiertos por `/soporte` mientras su ejecutor tiene un servicio activo también se vinculan automáticamente.
+
+Los servicios, movimientos de voz, horarios de soportes y referencias de grabación se guardan en la base de datos. El contador se recupera usando la hora persistida. Tras un reinicio, la captura interrumpida queda marcada como tal y solo se inicia un nuevo segmento si el Staff está en Asistencia Staff; los segmentos de soporte continúan usando sus propias reglas de consentimiento. El informe final se publica únicamente en `1573152199251591218` y contiene referencias, no adjuntos privados.
+
+Este comando usa el volumen y la retención ya configurados para las grabaciones. Antes de desplegarlo, respalda la base de datos y aprueba la migración `20261120120000_add_staff_services`; luego aplica las migraciones con `npm run deploy -w @rp-chile/db`, genera el cliente con `npm run db:generate` y registra el nuevo comando con `npm run bot:deploy-commands`. No requiere variables de entorno nuevas.
 "# chile-rp" 

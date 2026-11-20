@@ -11,6 +11,7 @@ import {
   SlashCommandBuilder,
   VoiceChannel,
 } from 'discord.js'
+import type { VoiceState } from 'discord.js'
 import { config } from '../config'
 import { crearEmbed, coloresEmbed } from '../utils/embeds'
 import { comoComponentsV2, editarComponentsV2 } from '../utils/components-v2'
@@ -20,6 +21,7 @@ import {
   limitePistasGrabacion,
 } from '../utils/soporte-grabacion'
 import { reproducirAnuncioSoporte } from '../utils/soporte-tts'
+import { liberarCapturaVoz, reservarCapturaVoz } from '../utils/registro-captura-voz'
 
 const efimero = MessageFlags.Ephemeral
 const comandoGuild = (name: string, description: string) =>
@@ -45,6 +47,7 @@ interface GrabacionDirecta {
 
 const grabacionesActivas = new Map<string, GrabacionDirecta>()
 const grabacionesIniciandose = new Set<string>()
+const cambiosVozEnCola = new Map<string, Promise<void>>()
 
 export const grabacionDirecta = [
   { data: grabarData, execute: ejecutarGrabar },
@@ -71,6 +74,7 @@ async function ejecutarGrabar(i: ChatInputCommandInteraction) {
   let aviso: Message | undefined
   let grabador: GrabadorSoporte | undefined
   let activa: GrabacionDirecta | undefined
+  let canalReservadoId: string | undefined
   let errorConexion: Error | undefined
   let capturaLista = false
   const grabacionId = randomUUID()
@@ -113,6 +117,10 @@ async function ejecutarGrabar(i: ChatInputCommandInteraction) {
       allowedMentions: { users: participantes, parse: [] },
     }))
 
+    if (!reservarCapturaVoz(canalVoz.id, grabacionId)) {
+      throw new Error('Ya hay otra captura activa en este canal de voz.')
+    }
+    canalReservadoId = canalVoz.id
     await reproducirAnuncioSoporte(
       canalVoz,
       'Atención. Las voces de las personas presentes en este canal serán grabadas desde ahora. El staff puede detener la grabación con el comando correspondiente.',
@@ -179,6 +187,7 @@ async function ejecutarGrabar(i: ChatInputCommandInteraction) {
         console.error(`[Grabación ${grabacionId}] No se pudo limpiar el grabador:`, errorFinalizacion)
       })
     }
+    if (canalReservadoId) liberarCapturaVoz(canalReservadoId, grabacionId)
     await eliminarArchivosGrabacion(directorioGrabaciones, grabacionId).catch((errorLimpieza: unknown) => {
       console.error(`[Grabación ${grabacionId}] No se pudieron limpiar los archivos:`, errorLimpieza)
     })
@@ -210,6 +219,97 @@ async function actualizarAviso(
   }).catch((error: unknown) => {
     console.error('[Grabación directa] No se pudo actualizar el aviso:', error)
   })
+}
+
+export async function manejarEstadoVozGrabacionDirecta(
+  estadoAnterior: VoiceState,
+  estadoNuevo: VoiceState,
+): Promise<void> {
+  const canalVozId = estadoNuevo.channelId
+  if (!canalVozId || canalVozId === estadoAnterior.channelId) return
+
+  const activa = grabacionesActivas.get(estadoNuevo.guild.id)
+  if (!activa || activa.canalVoz.id !== canalVozId || activa.finalizando) return
+
+  const guildId = estadoNuevo.guild.id
+  const operacionAnterior = cambiosVozEnCola.get(guildId) ?? Promise.resolve()
+  const operacion = operacionAnterior
+    .catch(() => undefined)
+    .then(() => agregarParticipanteGrabacion(estadoNuevo, activa))
+  cambiosVozEnCola.set(guildId, operacion)
+
+  try {
+    await operacion
+  } finally {
+    if (cambiosVozEnCola.get(guildId) === operacion) cambiosVozEnCola.delete(guildId)
+  }
+}
+
+async function agregarParticipanteGrabacion(
+  estado: VoiceState,
+  grabacion: GrabacionDirecta,
+): Promise<void> {
+  const activa = grabacionesActivas.get(estado.guild.id)
+  if (
+    activa !== grabacion ||
+    grabacion.finalizando ||
+    estado.channelId !== grabacion.canalVoz.id ||
+    grabacion.participantes.includes(estado.id)
+  ) return
+
+  const miembro = estado.member ?? await estado.guild.members.fetch(estado.id)
+  if (miembro.user.bot || miembro.voice.channelId !== grabacion.canalVoz.id) return
+
+  const puedeAgregarPista = grabacion.participantes.length < limitePistasGrabacion
+  const mensaje = puedeAgregarPista
+    ? `Aviso: el canal de voz **${grabacion.canalVoz.name}** está siendo grabado. Si permaneces en el canal, tu pista podrá incluirse desde ahora.`
+    : `Aviso: el canal de voz **${grabacion.canalVoz.name}** está siendo grabado. Se alcanzó el límite de ${limitePistasGrabacion} pistas, así que tu audio no se incluirá.`
+
+  try {
+    await miembro.send({ content: mensaje, allowedMentions: { parse: [] } })
+  } catch (error) {
+    console.error(
+      `[Grabación ${grabacion.id}] No se notificó por DM a ${miembro.id}; su pista no se incluirá:`,
+      error,
+    )
+    return
+  }
+
+  if (!puedeAgregarPista) return
+
+  const miembroActual = await estado.guild.members.fetch(miembro.id)
+  if (
+    miembroActual.voice.channelId !== grabacion.canalVoz.id ||
+    grabacionesActivas.get(estado.guild.id) !== grabacion ||
+    grabacion.finalizando ||
+    grabacion.participantes.includes(miembro.id) ||
+    grabacion.participantes.length >= limitePistasGrabacion
+  ) return
+
+  grabacion.participantes.push(miembro.id)
+  grabacion.grabador.manifiesto.participantes = [...new Set([
+    ...grabacion.grabador.manifiesto.participantes,
+    miembro.id,
+  ])]
+
+  try {
+    await grabacion.grabador.actualizarEstado('PAUSADA')
+    await grabacion.grabador.iniciarCaptura([miembro.id])
+    await actualizarAviso(
+      grabacion.aviso,
+      'Grabación activa',
+      `La captura está activa en **${grabacion.canalVoz.name}**. Para detenerla, usa \`/parar-grabacion\`.\n\nPistas incluidas: ${grabacion.participantes.map((id) => `<@${id}>`).join(', ')}`,
+      coloresEmbed.exito,
+    )
+  } catch (error) {
+    console.error(`[Grabación ${grabacion.id}] No se pudo añadir la pista de ${miembro.id}:`, error)
+    await miembro.send({
+      content: `El canal **${grabacion.canalVoz.name}** sigue grabándose, pero no se pudo añadir tu pista por un error técnico.`,
+      allowedMentions: { parse: [] },
+    }).catch((errorAviso: unknown) => {
+      console.error(`[Grabación ${grabacion.id}] No se pudo informar el error de pista a ${miembro.id}:`, errorAviso)
+    })
+  }
 }
 
 async function ejecutarPararGrabacion(i: ChatInputCommandInteraction) {
@@ -254,8 +354,9 @@ async function finalizarYEnviarPorDM(activa: GrabacionDirecta): Promise<'enviado
       return 'sin-audio'
     }
     const solicitante = await activa.guild.client.users.fetch(activa.solicitanteId)
+    const pistasIncluidas = resultado.pistas.map(({ discordId }) => `<@${discordId}>`).join(', ')
     await solicitante.send({
-      content: `Grabación de voz finalizada en **${activa.canalVoz.name}**. Pistas incluidas: ${activa.participantes.map((id) => `<@${id}>`).join(', ')}.`,
+      content: `Grabación de voz finalizada en **${activa.canalVoz.name}**. Pistas incluidas: ${pistasIncluidas || 'ninguna'}.`,
       files: [new AttachmentBuilder(resultado.mezclaPath, {
         name: `grabacion-${activa.id}.ogg`,
       })],
@@ -277,6 +378,7 @@ async function finalizarYEnviarPorDM(activa: GrabacionDirecta): Promise<'enviado
     )
     throw error
   } finally {
+    liberarCapturaVoz(activa.canalVoz.id, activa.id)
     await eliminarArchivosGrabacion(activa.directorioGrabaciones, activa.id).catch((error: unknown) => {
       console.error(`[Grabación ${activa.id}] No se pudieron eliminar los archivos locales tras finalizar:`, error)
     })

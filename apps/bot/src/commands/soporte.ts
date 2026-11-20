@@ -63,6 +63,11 @@ import type {
   MensajeGrabacionLog,
 } from '../utils/soporte-grabacion'
 import { anunciosTtsSoporte, reproducirAnuncioSoporte, VOZ_TTS_SOPORTE } from '../utils/soporte-tts'
+import {
+  actualizarGrabacionSoporteEnServicioStaff,
+  cerrarSoporteEnServicioStaff,
+  registrarSoporteEnServicioActivo,
+} from '../utils/servicio-staff'
 
 const efimero = MessageFlags.Ephemeral
 const duracionInactividadMs = 14 * 60_000
@@ -161,6 +166,12 @@ export const soporteData = new SlashCommandBuilder()
   .setContexts(InteractionContextType.Guild)
 
 export const soporte = { data: soporteData, execute: ejecutarSoporte }
+
+export function hayGrabacionSoporteActiva(guildId: string): boolean {
+  return [...grabadoresSoporte.keys()].some((soporteId) =>
+    guildsSoporteActivos.get(soporteId)?.id === guildId,
+  )
+}
 
 async function ejecutarSoporte(i: ChatInputCommandInteraction) {
   if (!i.inCachedGuild()) {
@@ -588,15 +599,7 @@ async function completarCreacionSoporte(
   sesion: SesionSoporte,
 ) {
   try {
-    const resultado = await crearSoporte(guild, ejecutor, sesion.participantes)
-    const registro = resultado.registro
-    const anuncioInicial = registro.grabacion === 'ESPERANDO CONSENTIMIENTO'
-      ? anunciosTtsSoporte.inicioConConsentimiento
-      : anunciosTtsSoporte.inicioSinGrabacion
-    await anunciarEnSoporte(guild, registro, anuncioInicial, 'inicio')
-    await actualizarMensajeSoporte(guild, registro).catch((error: unknown) => {
-      console.error(`[Soporte ${registro.id}] No se pudieron habilitar los controles tras el anuncio inicial:`, error)
-    })
+    const registro = await crearSoporteConAviso(guild, ejecutor, sesion.participantes)
     return i.editReply({
       content:
         `Soporte **${registro.id}** habilitado.\n` +
@@ -613,6 +616,39 @@ async function completarCreacionSoporte(
       allowedMentions: { parse: [] },
     })
   }
+}
+
+export async function crearSoporteDesdePanelPrivado(
+  guild: Guild,
+  ejecutorId: string,
+  participantes: ParticipantesSoporte,
+): Promise<{ id: string; canalVozId: string; canalEvidenciasId: string }> {
+  const ejecutor = await guild.members.fetch(ejecutorId)
+  if (!esPersonalAutorizado(ejecutor)) {
+    throw new Error('Solo el Staff, Moderación o Administración autorizada puede iniciar un soporte.')
+  }
+  const registro = await crearSoporteConAviso(guild, ejecutor.user, participantes)
+  return {
+    id: registro.id,
+    canalVozId: registro.canalVozId,
+    canalEvidenciasId: registro.canalEvidenciasId,
+  }
+}
+
+async function crearSoporteConAviso(
+  guild: Guild,
+  ejecutor: User,
+  participantes: ParticipantesSoporte,
+): Promise<RegistroSoporte> {
+  const { registro } = await crearSoporte(guild, ejecutor, participantes)
+  const anuncioInicial = registro.grabacion === 'ESPERANDO CONSENTIMIENTO'
+    ? anunciosTtsSoporte.inicioConConsentimiento
+    : anunciosTtsSoporte.inicioSinGrabacion
+  await anunciarEnSoporte(guild, registro, anuncioInicial, 'inicio')
+  await actualizarMensajeSoporte(guild, registro).catch((error: unknown) => {
+    console.error(`[Soporte ${registro.id}] No se pudieron habilitar los controles tras el anuncio inicial:`, error)
+  })
+  return registro
 }
 
 async function prepararSoporte(
@@ -846,6 +882,16 @@ async function crearSoporte(
   const bot = preparacion.bot
   const miembrosParticipantes = preparacion.miembrosParticipantes
   const usuariosIndividuales = obtenerIdsUsuariosParaMover(participantes, ejecutor.id)
+  await registrarSoporteEnServicioActivo({
+    guildId: guild.id,
+    staffDiscordId: ejecutor.id,
+    soporteId: registro.id,
+    canalVozId: registro.canalVozId,
+    abiertoEn: new Date(registro.abiertoEn),
+    estadoGrabacion: registro.grabacion,
+  }).catch((error: unknown) => {
+    console.error(`[Soporte ${registro.id}] No se pudo asociar el soporte al servicio Staff:`, error)
+  })
   for (const usuarioId of usuariosIndividuales) {
     const miembro = miembrosParticipantes.get(usuarioId)
     if (!miembro || !miembro.voice.channel) {
@@ -1832,6 +1878,14 @@ async function registrarEventoGrabacion(
   detalles: Record<string, unknown> = {},
 ): Promise<string[]> {
   if (guild) guildsSoporteActivos.set(registro.id, guild)
+  await actualizarGrabacionSoporteEnServicioStaff({
+    soporteId: registro.id,
+    estadoGrabacion: registro.grabacion,
+    iniciadoEn: registro.grabacionIniciadaEn ? new Date(registro.grabacionIniciadaEn) : null,
+    finalizadoEn: registro.grabacionFinalizadaEn ? new Date(registro.grabacionFinalizadaEn) : null,
+  }).catch((error: unknown) => {
+    console.error(`[Soporte ${registro.id}] No se pudo actualizar su grabación vinculada al servicio Staff:`, error)
+  })
   return registrarEventoSoporte(actorId, registro, evento, detalles)
 }
 
@@ -2410,6 +2464,20 @@ async function finalizarSoporte(i: ButtonInteraction, guild: Guild, registro: Re
       cerradoPorId: i.user.id,
       cerradoEn: actualizado.cerradoEn,
     })
+    await cerrarSoporteEnServicioStaff({
+      soporteId: registro.id,
+      finalizadoEn: new Date(actualizado.cerradoEn ?? Date.now()),
+      grabacionIniciadaEn: actualizado.grabacionIniciadaEn
+        ? new Date(actualizado.grabacionIniciadaEn)
+        : null,
+      grabacionFinalizadaEn: actualizado.grabacionFinalizadaEn
+        ? new Date(actualizado.grabacionFinalizadaEn)
+        : null,
+      estadoGrabacion: actualizado.grabacion,
+      resultado: 'CERRADO',
+    }).catch((error: unknown) => {
+      console.error(`[Soporte ${registro.id}] No se pudo cerrar su actividad de servicio Staff:`, error)
+    })
     let mensajeActualizado = true
     try {
       await actualizarMensajeSoporte(guild, actualizado)
@@ -2475,6 +2543,21 @@ async function cerrarSoportePorRetiroConsentimiento(
       })
       return { cerrado: false, canalesEliminados: false, eliminacionIntentada: false }
     }
+
+    await cerrarSoporteEnServicioStaff({
+      soporteId: registro.id,
+      finalizadoEn: new Date(cerrado.cerradoEn ?? Date.now()),
+      grabacionIniciadaEn: cerrado.grabacionIniciadaEn
+        ? new Date(cerrado.grabacionIniciadaEn)
+        : null,
+      grabacionFinalizadaEn: cerrado.grabacionFinalizadaEn
+        ? new Date(cerrado.grabacionFinalizadaEn)
+        : null,
+      estadoGrabacion: cerrado.grabacion,
+      resultado: 'CERRADO_POR_RETIRO_DE_CONSENTIMIENTO',
+    }).catch((error: unknown) => {
+      console.error(`[Soporte ${registro.id}] No se pudo cerrar su actividad de servicio Staff:`, error)
+    })
 
     await actualizarMensajeSoporte(guild, cerrado).catch((error: unknown) => {
       console.error(`[Soporte ${registro.id}] No se pudo actualizar el expediente cerrado:`, error)
@@ -2739,6 +2822,7 @@ export async function inicializarGrabacionesSoporte(client: Client): Promise<voi
   }
 
   for (const manifiesto of manifiestosInterrumpidos) {
+    if (manifiesto.origenGrabacion === 'servicio-staff') continue
     const registro = await leerRegistroSoporte(manifiesto.soporteId)
     if (!registro || registro.estado !== 'ABIERTO') continue
     const actualizado: RegistroSoporte = {
@@ -2759,6 +2843,7 @@ export async function inicializarGrabacionesSoporte(client: Client): Promise<voi
 
   try {
     for (const manifiesto of await listarManifiestosGrabacion(directorio)) {
+      if (manifiesto.origenGrabacion === 'servicio-staff') continue
       if (manifiesto.estado !== 'FINALIZADA') continue
       const registro = await leerRegistroSoporte(manifiesto.soporteId)
       if (!registro) {
@@ -2874,7 +2959,10 @@ async function ejecutarRetencionGrabaciones(client: Client): Promise<void> {
     try {
       const registro = await leerRegistroSoporte(manifiesto.soporteId)
       if (!registro) {
-        if (manifiesto.origenGrabacion === 'directa') {
+        if (
+          manifiesto.origenGrabacion === 'directa' ||
+          manifiesto.origenGrabacion === 'servicio-staff'
+        ) {
           await eliminarArchivosGrabacion(config.grabaciones.directorio, manifiesto.soporteId)
           continue
         }
