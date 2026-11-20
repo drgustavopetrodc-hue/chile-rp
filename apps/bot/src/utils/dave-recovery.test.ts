@@ -80,6 +80,17 @@ test('el cierre WebSocket inicia reconexión sin finalizar por el estado Disconn
   )
 })
 
+test('DAVE no recrea la conexión ni repite reconexiones manuales', async () => {
+  const fuente = await readFile(
+    join(process.cwd(), 'src', 'utils', 'soporte-grabacion.ts'),
+    'utf8',
+  )
+  assert.match(fuente, /El parche DAVE está recuperando el descifrado/)
+  assert.match(fuente, /30_000/)
+  assert.doesNotMatch(fuente, /Reconexión DAVE completada/)
+  assert.doesNotMatch(fuente, /reconectarDespuesDeErrorDAVE/)
+})
+
 test('el manejador global ignora canales e interacciones Discord desconocidos', async () => {
   const fuente = await readFile(
     join(process.cwd(), 'src', 'index.ts'),
@@ -127,7 +138,9 @@ test('cada entrada humana a Asistencia Staff reproduce el saludo institucional',
   )
   assert.match(fuente, /nuevo\.channelId === grabacionEnCanal\.canal\.id/)
   assert.match(fuente, /await anunciarBienvenidaAsistencia/)
-  assert.match(fuente, /responsable\.miembro\.displayName/)
+  assert.match(fuente, /bienvenidasAsistenciaEnCurso/)
+  assert.match(fuente, /bienvenidasAsistenciaEnCurso\.delete/)
+  assert.match(fuente, /if \(bienvenidasAsistenciaEnCurso\.has\(clave\)\) return/)
 })
 
 test('el anuncio institucional no se reproduce al entrar al canal de soporte', async () => {

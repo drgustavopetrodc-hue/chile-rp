@@ -90,6 +90,7 @@ const grabacionesAsistencia = new Map<string, GrabacionAsistenciaActiva>()
 const serviciosIniciando = new Set<string>()
 const finalizacionesEnCurso = new Set<string>()
 const cambiosVozEnCola = new Map<string, Promise<void>>()
+const bienvenidasAsistenciaEnCurso = new Set<string>()
 let temporizadorPaneles: NodeJS.Timeout | undefined
 
 export const servicioStaff = { data: comandoData, execute: ejecutarIniciarServicio }
@@ -319,6 +320,9 @@ export async function manejarEstadoVozServicioStaff(
 }
 
 async function procesarCambioVozServicio(anterior: VoiceState, nuevo: VoiceState): Promise<void> {
+  if (anterior.channelId === canalAsistenciaStaffId && nuevo.channelId !== canalAsistenciaStaffId) {
+    bienvenidasAsistenciaEnCurso.delete(`${nuevo.guild.id}:${canalAsistenciaStaffId}:${nuevo.id}`)
+  }
   const grabacionEnCanal = grabacionesAsistencia.get(nuevo.guild.id)
   if (
     grabacionEnCanal &&
@@ -326,7 +330,7 @@ async function procesarCambioVozServicio(anterior: VoiceState, nuevo: VoiceState
     anterior.channelId !== nuevo.channelId
   ) {
     await agregarParticipanteServicio(nuevo, grabacionEnCanal)
-    await anunciarBienvenidaAsistencia(nuevo.guild, grabacionEnCanal.canal)
+    await anunciarBienvenidaAsistencia(nuevo.guild, grabacionEnCanal.canal, nuevo.id)
   }
 
   const servicio = await obtenerServicioEnCurso(nuevo.guild.id, nuevo.id)
@@ -594,7 +598,14 @@ async function iniciarOAsociarGrabacion(
   await actualizarPanelPorId(guild.client, servicio.id)
 }
 
-async function anunciarBienvenidaAsistencia(guild: Guild, canal: VoiceChannel): Promise<void> {
+async function anunciarBienvenidaAsistencia(
+  guild: Guild,
+  canal: VoiceChannel,
+  usuarioId: string,
+): Promise<void> {
+  const clave = `${guild.id}:${canal.id}:${usuarioId}`
+  if (bienvenidasAsistenciaEnCurso.has(clave)) return
+  bienvenidasAsistenciaEnCurso.add(clave)
   const miembros = [...canal.members.values()].filter((miembro) => !miembro.user.bot)
   if (!miembros.length) return
 

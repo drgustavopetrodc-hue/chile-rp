@@ -288,8 +288,8 @@ export class GrabadorSoporte {
   private capturaActiva = false
   private finalizando = false
   private ultimoChequeoEspacio = 0
-  private reconectando = false
   private reconexionPromise: Promise<void> | undefined
+  private ultimoIntentoReconexion = 0
   private ultimoAvisoOpusCorrupto = 0
 
   private constructor(
@@ -317,7 +317,9 @@ export class GrabadorSoporte {
     this.conexion.on('error', (error) => {
       if (this.finalizando) return
       if (esErrorDAVE(error)) {
-        void this.reconectarDespuesDeErrorDAVE(error)
+        console.warn(
+          `[Soporte ${this.manifiesto.soporteId}] El parche DAVE está recuperando el descifrado; no se recreará la conexión.`,
+        )
         return
       }
       this.conexionError(error)
@@ -334,59 +336,44 @@ export class GrabadorSoporte {
   }
 
   private reconectarDespuesDeErrorVoz(error: Error): Promise<void> {
-    return this.reconexionPromise ?? this.reconectarDespuesDeError(error)
-  }
-
-  private reconectarDespuesDeErrorDAVE(error: Error): Promise<void> {
-    return this.reconectarDespuesDeError(error)
-  }
-
-  private reconectarDespuesDeError(error: Error): Promise<void> {
     if (this.reconexionPromise) return this.reconexionPromise
+    const ahora = Date.now()
+    if (ahora - this.ultimoIntentoReconexion < 30_000) {
+      return Promise.resolve()
+    }
+    this.ultimoIntentoReconexion = ahora
     this.reconexionPromise = (async () => {
       const debiaCapturar = this.capturaActiva
-      for (let intento = 1; intento <= 3 && !this.finalizando; intento++) {
-        try {
-          await esperarReconexionVoz(intento === 1 ? 750 : intento * 1_500)
-          if (this.finalizando) return
-          this.reconectando = true
-          if (this.conexion.state.status === VoiceConnectionStatus.Destroyed) {
-            this.conexion = joinVoiceChannel({
-              channelId: this.canalVoz.id,
-              guildId: this.guild.id,
-              adapterCreator: this.guild.voiceAdapterCreator,
-              selfDeaf: false,
-              selfMute: false,
-            })
-            this.instalarEscuchaConexion()
-          } else {
-            const rejoin = this.conexion.rejoin({
-              channelId: this.canalVoz.id,
-              selfDeaf: false,
-              selfMute: false,
-            })
-            if (!rejoin) throw new Error('La conexión de voz no admitió reingresar al canal.')
-          }
-          await entersState(this.conexion, VoiceConnectionStatus.Ready, duracionEsperaVozMs)
-          this.reconectando = false
-          this.limpiarFlujos()
-          this.capturaActiva = debiaCapturar
-          if (debiaCapturar) {
-            await this.suscribir(this.manifiesto.participantes)
-          }
-          console.info(
-            `[Soporte ${this.manifiesto.soporteId}] Reconexión DAVE completada tras el intento ${intento}.`,
-          )
-          return
-        } catch (errorReconexion) {
-          this.reconectando = false
-          console.warn(
-            `[Soporte ${this.manifiesto.soporteId}] Falló la reconexión DAVE ${intento}/3:`,
-            errorReconexion,
-          )
+      try {
+        await esperarReconexionVoz(750)
+        if (this.finalizando) return
+        if (this.conexion.state.status === VoiceConnectionStatus.Ready) return
+        if (this.conexion.state.status === VoiceConnectionStatus.Destroyed) {
+          this.conexion = joinVoiceChannel({
+            channelId: this.canalVoz.id,
+            guildId: this.guild.id,
+            adapterCreator: this.guild.voiceAdapterCreator,
+            selfDeaf: false,
+            selfMute: false,
+          })
+          this.instalarEscuchaConexion()
+        } else {
+          const rejoin = this.conexion.rejoin({
+            channelId: this.canalVoz.id,
+            selfDeaf: false,
+            selfMute: false,
+          })
+          if (!rejoin) throw new Error('La conexión de voz no admitió reingresar al canal.')
         }
-      }
-      if (!this.finalizando) {
+        await entersState(this.conexion, VoiceConnectionStatus.Ready, duracionEsperaVozMs)
+        this.limpiarFlujos()
+        this.capturaActiva = debiaCapturar
+        if (debiaCapturar) {
+          await this.suscribir(this.manifiesto.participantes)
+        }
+        console.info(`[Soporte ${this.manifiesto.soporteId}] Reconexión de voz completada.`)
+      } catch (errorReconexion) {
+        console.warn(`[Soporte ${this.manifiesto.soporteId}] No se pudo reconectar la voz:`, errorReconexion)
         this.capturaActiva = false
         this.limpiarFlujos()
         this.conexionError(error)
@@ -701,7 +688,14 @@ export class GrabadorSoporte {
         }
       })
       flujo.on('error', (error: Error) => {
-        if (!this.finalizando) this.conexionError(error)
+        if (this.finalizando) return
+        if (esErrorDAVE(error)) {
+          console.warn(
+            `[Soporte ${this.manifiesto.soporteId}] El receptor está recuperando una trama DAVE; se conserva la conexión.`,
+          )
+          return
+        }
+        this.conexionError(error)
       })
     }
   }
