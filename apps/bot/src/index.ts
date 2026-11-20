@@ -132,6 +132,12 @@ client.on(Events.InteractionCreate, async (i) => {
   } catch (err) {
     console.error(err)
     if (comandoAuditado) await registrarComandoPrivilegiado(comandoAuditado, 'error', err).catch(console.error)
+    const codigoDiscord = typeof err === 'object' && err !== null && 'code' in err
+      ? (err as { code?: number }).code
+      : undefined
+    if (codigoDiscord === 10008 || codigoDiscord === 10062) {
+      return
+    }
     if (i.isRepliable()) {
       const aviso = { content: 'Ocurrió un error. Avisa al staff.', flags: MessageFlags.Ephemeral } as const
       if (i.replied || i.deferred) await i.followUp(aviso).catch(() => {})

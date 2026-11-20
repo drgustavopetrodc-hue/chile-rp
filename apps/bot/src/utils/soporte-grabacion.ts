@@ -106,6 +106,13 @@ export function esErrorDAVE(error: Error): boolean {
     detalle.includes('unencryptedwhenpassthroughdisabled')
 }
 
+export function esPaqueteOpusCorrupto(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const detalle = `${error.name} ${error.message}`.toLowerCase()
+  return detalle.includes('compressed data passed is corrupted') ||
+    detalle.includes('invalid packet')
+}
+
 function esperarReconexionVoz(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -283,6 +290,7 @@ export class GrabadorSoporte {
   private ultimoChequeoEspacio = 0
   private reconectando = false
   private reconexionPromise: Promise<void> | undefined
+  private ultimoAvisoOpusCorrupto = 0
 
   private constructor(
     directorio: string,
@@ -658,9 +666,21 @@ export class GrabadorSoporte {
           const pista = this.pistaPorUsuario.get(discordId) ?? this.crearPista(discordId, activa.decoder)
           pista.cola = pista.cola
             .then(() => this.procesarPaquete(pista, paquete, recibidoEn))
-            .catch((error: unknown) => this.conexionError(
-              error instanceof Error ? error : new Error('No se pudo procesar un paquete Opus.'),
-            ))
+            .catch((error: unknown) => {
+              if (esPaqueteOpusCorrupto(error)) {
+                const ahora = Date.now()
+                if (ahora - this.ultimoAvisoOpusCorrupto >= 5_000) {
+                  this.ultimoAvisoOpusCorrupto = ahora
+                  console.warn(
+                    `[Soporte ${this.manifiesto.soporteId}] Se omitió una trama Opus corrupta de ${discordId}.`,
+                  )
+                }
+                return
+              }
+              this.conexionError(
+                error instanceof Error ? error : new Error('No se pudo procesar un paquete Opus.'),
+              )
+            })
         } catch (error) {
           this.conexionError(
             error instanceof Error ? error : new Error('No se pudo iniciar la pista de audio.'),

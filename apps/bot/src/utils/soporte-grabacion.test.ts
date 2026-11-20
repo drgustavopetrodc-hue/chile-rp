@@ -10,6 +10,7 @@ import {
   crearConsentimientosPendientes,
   coincidenParticipantesGrabacion,
   esErrorDAVE,
+  esPaqueteOpusCorrupto,
   estaDentroDeVolumenMontado,
   guardarManifiestoGrabacion,
   leerManifiestoGrabacion,
@@ -26,6 +27,14 @@ test('clasifica los errores DAVE de descifrado como recuperables', () => {
   const error = new Error('Failed to decrypt: DecryptionFailed(UnencryptedWhenPassthroughDisabled)')
   assert.equal(esErrorDAVE(error), true)
   assert.equal(esErrorDAVE(new Error('El volumen de grabación no tiene espacio')), false)
+})
+
+test('clasifica una trama Opus corrupta como recuperable sin cerrar la sesión', () => {
+  assert.equal(
+    esPaqueteOpusCorrupto(new TypeError('The compressed data passed is corrupted')),
+    true,
+  )
+  assert.equal(esPaqueteOpusCorrupto(new Error('FFmpeg terminó con 1: sin detalles')), false)
 })
 
 test('exige consentimiento individual de cada participante', () => {
