@@ -1,20 +1,26 @@
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
   ChatInputCommandInteraction,
   InteractionContextType,
   MessageFlags,
+  NewsChannel,
   PermissionFlagsBits,
   SlashCommandBuilder,
+  TextChannel,
 } from 'discord.js'
+import { fileURLToPath } from 'node:url'
 import { db } from '@rp-chile/db'
 import { crearEmbed, coloresEmbed } from '../utils/embeds'
-import { editarComponentsV2, enviarComponentsV2 } from '../utils/components-v2'
+import { enviarComponentsV2 } from '../utils/components-v2'
 
 const efimero = MessageFlags.Ephemeral
 const reglasPorDefecto = 'Respeta las reglas del servidor, mantén el rol y trata a los demás con respeto.'
+const imagenApertura = fileURLToPath(new URL('../../assets/servidor-abierto.png', import.meta.url))
+const nombreImagenApertura = 'servidor-abierto.png'
 const guildCommand = (name: string, description: string) => new SlashCommandBuilder().setName(name).setDescription(description).setContexts(InteractionContextType.Guild)
 
 const aperturaData = guildCommand('apertura', 'Vota para abrir el servidor, con plazo máximo de 30 minutos')
@@ -58,8 +64,10 @@ async function ejecutarApertura(i: ChatInputCommandInteraction) {
   )
   await guardarEstado(false, 'Votación de apertura en curso')
   const mensaje = await i.reply({
-    embeds: [crearEmbed('Votación de apertura', `Meta: **${meta} votos favorables**.\nPlazo máximo: **30 minutos**.\nEl servidor permanecerá cerrado hasta alcanzar la meta.`, coloresEmbed.aviso)],
+    embeds: [crearEmbedVotacionApertura(meta, 0, 0, 30)],
     components: [botones()],
+    files: [new AttachmentBuilder(imagenApertura, { name: nombreImagenApertura })],
+    allowedMentions: { parse: [] },
     fetchReply: true,
   })
   const votos = new Map<string, boolean>()
@@ -71,8 +79,9 @@ async function ejecutarApertura(i: ChatInputCommandInteraction) {
     const contra = votos.size - favor
     const minutosRestantes = Math.ceil(Math.max(0, plazoMs - (Date.now() - inicio)) / 60_000)
     await boton.update({
-      embeds: [crearEmbed('Votación de apertura', `A favor: **${favor}/${meta}** · En contra: **${contra}**\nTiempo restante: **${minutosRestantes} min**.`, coloresEmbed.aviso)],
+      embeds: [crearEmbedVotacionApertura(meta, favor, contra, minutosRestantes)],
       components: [botones()],
+      attachments: [...mensaje.attachments.values()],
     })
     if (favor >= meta) collector.stop('meta')
   })
@@ -81,21 +90,132 @@ async function ejecutarApertura(i: ChatInputCommandInteraction) {
     const contra = votos.size - favor
     const abierto = motivo === 'meta' && favor >= meta
     if (abierto) await guardarEstado(true, 'Votación aprobada')
-    await editarComponentsV2(mensaje, {
-      embeds: [crearEmbed(abierto ? 'Meta alcanzada · servidor abierto' : 'Plazo finalizado · servidor cerrado',
-        `Votos favorables: **${favor}/${meta}** · En contra: **${contra}**.${abierto ? '' : '\nNo se alcanzó la meta dentro de los 30 minutos.'}`,
-        abierto ? coloresEmbed.exito : coloresEmbed.neutro)],
+    await mensaje.edit({
+      embeds: [crearEmbedVotacionApertura(meta, favor, contra, 0, abierto ? 'aprobada' : 'finalizada')],
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(siId).setLabel('Votación finalizada').setStyle(ButtonStyle.Secondary).setDisabled(true),
       )],
-    }).catch(() => {})
+      attachments: [...mensaje.attachments.values()],
+    }).catch((error: unknown) => {
+      console.error('[Servidor] No se pudo actualizar el resultado de la votación de apertura:', error)
+    })
   })
   return undefined
 }
 
+function crearEmbedVotacionApertura(
+  meta: number,
+  favor: number,
+  contra: number,
+  minutosRestantes: number,
+  resultado?: 'aprobada' | 'finalizada',
+) {
+  const abierta = resultado === 'aprobada'
+  const finalizada = resultado !== undefined
+  const titulo = abierta
+    ? '¡Votación aprobada!'
+    : finalizada
+      ? 'Votación finalizada'
+      : 'Votación para abrir el servidor'
+  const descripcion = abierta
+    ? 'La comunidad alcanzó la meta y el servidor quedó abierto. ¡Gracias por participar!'
+    : finalizada
+      ? 'La votación terminó sin alcanzar la meta. El servidor permanecerá cerrado.'
+      : 'El equipo de moderación inició una votación para decidir la apertura del servidor.\n\n' +
+        'Emite tu voto con los botones de abajo. Puedes cambiarlo mientras la votación siga activa.'
+  const embed = crearEmbed(
+    titulo,
+    `${descripcion}\n\nPor favor, espera el resultado de la votación y mantén un ambiente respetuoso para que todos disfrutemos la sesión.`,
+    finalizada ? (abierta ? coloresEmbed.exito : coloresEmbed.neutro) : coloresEmbed.aviso,
+  )
+    .addFields(
+      { name: 'Votos requeridos', value: `A favor: **${meta}**`, inline: true },
+      { name: 'Resultado actual', value: `A favor: **${favor}**\nEn contra: **${contra}**`, inline: true },
+    )
+    .setImage(`attachment://${nombreImagenApertura}`)
+
+  if (!finalizada) {
+    embed.addFields({
+      name: 'Tiempo restante',
+      value: `Hasta **${minutosRestantes} min** para votar.`,
+      inline: false,
+    })
+  } else {
+    embed.addFields({
+      name: 'Resultado',
+      value: abierta
+        ? `Meta alcanzada: **${favor}/${meta} votos favorables**.`
+        : `No se alcanzó la meta: **${favor}/${meta} votos favorables**.`,
+      inline: false,
+    })
+  }
+  return embed
+}
+
 async function cambiarEstado(i: ChatInputCommandInteraction, abierto: boolean) {
   if (!esStaff(i)) return denegado(i)
+
+  let canalAnuncios: TextChannel | NewsChannel | null = null
+  if (abierto) {
+    const guild = i.guild
+    if (!guild) return i.reply({ content: 'Usa este comando dentro del servidor.', flags: efimero })
+    const canalId = process.env.CANAL_ANUNCIOS_ID ?? i.channelId
+    const canal = await guild.channels.fetch(canalId).catch((error: unknown) => {
+      console.error(`[Servidor] No se pudo obtener el canal de anuncios ${canalId}:`, error)
+      return null
+    })
+    if (!canal || (canal.type !== ChannelType.GuildText && canal.type !== ChannelType.GuildAnnouncement)) {
+      return i.reply({
+        content: 'No se pudo publicar el anuncio: configura un canal de anuncios válido o ejecuta /abrir en un canal de texto.',
+        flags: efimero,
+      })
+    }
+    canalAnuncios = canal
+
+    const bot = await guild.members.fetchMe()
+    const permisos = bot.permissionsIn(canalAnuncios)
+    if (
+      !permisos.has(PermissionFlagsBits.ViewChannel) ||
+      !permisos.has(PermissionFlagsBits.SendMessages) ||
+      !permisos.has(PermissionFlagsBits.AttachFiles)
+    ) {
+      return i.reply({
+        content: 'No se pudo publicar el anuncio: necesito permisos para ver el canal, enviar mensajes y adjuntar archivos.',
+        flags: efimero,
+      })
+    }
+  }
+
   await guardarEstado(abierto, `Actualizado por ${i.user.tag}`)
+  if (abierto && canalAnuncios) {
+    const embed = crearEmbed(
+      '¡Nueva sesión abierta!',
+      '¡Ya estamos en sesión! 🎉 El servidor está abierto para que entres, roles y armes tu propia historia con la comunidad. 🇨🇱\n\n' +
+        'Antes de entrar, recuerda lo básico: respeta a los demás, mantén el rol y sigue las indicaciones del staff. Así todos disfrutamos una buena sesión.\n\n' +
+        '🔥 ¡Junta a tus amigos y entra a rolear!',
+      coloresEmbed.exito,
+    )
+      .addFields({
+        name: 'Información',
+        value: '🟢 Estado: **Abierto**\n🇨🇱 Comunidad: **RP Chile**',
+      })
+      .setImage(`attachment://${nombreImagenApertura}`)
+
+    try {
+      await canalAnuncios.send({
+        embeds: [embed],
+        files: [new AttachmentBuilder(imagenApertura, { name: nombreImagenApertura })],
+        allowedMentions: { parse: [] },
+      })
+    } catch (error) {
+      console.error('[Servidor] Se marcó abierto, pero no se pudo publicar el anuncio:', error)
+      return i.reply({
+        content: 'El servidor quedó marcado como abierto, pero falló la publicación del anuncio. Revisa los permisos del canal.',
+        flags: efimero,
+      })
+    }
+  }
+
   return i.reply({ content: abierto ? 'El servidor quedó marcado como abierto.' : 'El servidor quedó marcado como cerrado.', flags: efimero })
 }
 
