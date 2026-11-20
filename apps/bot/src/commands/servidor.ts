@@ -72,20 +72,27 @@ async function ejecutarApertura(i: ChatInputCommandInteraction) {
   })
   const votos = new Map<string, boolean>()
   const collector = mensaje.createMessageComponentCollector({ time: plazoMs })
+  let actualizacionVotos = Promise.resolve()
   collector.on('collect', async (boton) => {
     if (boton.customId !== siId && boton.customId !== noId) return
     votos.set(boton.user.id, boton.customId === siId)
     const favor = [...votos.values()].filter(Boolean).length
     const contra = votos.size - favor
     const minutosRestantes = Math.ceil(Math.max(0, plazoMs - (Date.now() - inicio)) / 60_000)
-    await boton.update({
-      embeds: [crearEmbedVotacionApertura(meta, favor, contra, minutosRestantes)],
-      components: [botones()],
-      attachments: [...mensaje.attachments.values()],
+    await boton.deferUpdate()
+    actualizacionVotos = actualizacionVotos.then(async () => {
+      await mensaje.edit({
+        embeds: [crearEmbedVotacionApertura(meta, favor, contra, minutosRestantes)],
+        components: [botones()],
+        attachments: [...mensaje.attachments.keys()].map((id) => ({ id })),
+      })
+    }).catch((error: unknown) => {
+      console.error('[Servidor] No se pudo actualizar el conteo de la votación de apertura:', error)
     })
     if (favor >= meta) collector.stop('meta')
   })
   collector.on('end', async (_recogidas, motivo) => {
+    await actualizacionVotos
     const favor = [...votos.values()].filter(Boolean).length
     const contra = votos.size - favor
     const abierto = motivo === 'meta' && favor >= meta
@@ -95,7 +102,7 @@ async function ejecutarApertura(i: ChatInputCommandInteraction) {
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(siId).setLabel('Votación finalizada').setStyle(ButtonStyle.Secondary).setDisabled(true),
       )],
-      attachments: [...mensaje.attachments.values()],
+      attachments: [...mensaje.attachments.keys()].map((id) => ({ id })),
     }).catch((error: unknown) => {
       console.error('[Servidor] No se pudo actualizar el resultado de la votación de apertura:', error)
     })
@@ -128,6 +135,7 @@ function crearEmbedVotacionApertura(
     `${descripcion}\n\nPor favor, espera el resultado de la votación y mantén un ambiente respetuoso para que todos disfrutemos la sesión.`,
     finalizada ? (abierta ? coloresEmbed.exito : coloresEmbed.neutro) : coloresEmbed.aviso,
   )
+    .setTitle(`━━━━━━━━━━━━━━━━━━━━\n${titulo}`)
     .addFields(
       { name: 'Votos requeridos', value: `A favor: **${meta}**`, inline: true },
       { name: 'Resultado actual', value: `A favor: **${favor}**\nEn contra: **${contra}**`, inline: true },
