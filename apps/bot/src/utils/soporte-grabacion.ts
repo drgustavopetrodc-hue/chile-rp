@@ -54,6 +54,7 @@ export interface MensajeGrabacionLog {
 }
 
 export interface ManifiestoGrabacionSoporte {
+  origenGrabacion?: 'soporte' | 'directa'
   soporteId: string
   guildId: string
   estado: EstadoGrabacionSoporte
@@ -130,6 +131,15 @@ export function todosAceptaronConsentimiento(
 ): boolean {
   return consentimientos.length > 0 &&
     consentimientos.every((consentimiento) => consentimiento.estado === 'ACEPTADO')
+}
+
+export function coincidenParticipantesGrabacion(
+  esperados: readonly string[],
+  actuales: readonly string[],
+): boolean {
+  if (esperados.length !== actuales.length) return false
+  const ordenadosActuales = [...actuales].sort()
+  return [...esperados].sort().every((discordId, indice) => discordId === ordenadosActuales[indice])
 }
 
 export function rutaDirectorioGrabacion(
@@ -297,6 +307,7 @@ export class GrabadorSoporte {
       conexionError: (error: Error) => void
       primerPaquete: (discordId: string) => void | Promise<void>
     },
+    origenGrabacion: 'soporte' | 'directa' = 'soporte',
   ): Promise<GrabadorSoporte> {
     if (!Number.isInteger(retencionDias) || retencionDias < 1 || retencionDias > 3650) {
       throw new Error('SOPORTE_RETENCION_DIAS debe ser un entero entre 1 y 3650.')
@@ -319,6 +330,7 @@ export class GrabadorSoporte {
     }
 
     const manifiesto: ManifiestoGrabacionSoporte = {
+      origenGrabacion,
       soporteId,
       guildId: guild.id,
       estado: 'ESPERANDO CONSENTIMIENTO',
@@ -931,6 +943,9 @@ function esManifiestoGrabacion(valor: unknown): valor is ManifiestoGrabacionSopo
   const manifiesto = valor as Record<string, unknown>
   return typeof manifiesto.soporteId === 'string' &&
     /^[\da-f-]{36}$/i.test(manifiesto.soporteId) &&
+    (manifiesto.origenGrabacion === undefined ||
+      manifiesto.origenGrabacion === 'soporte' ||
+      manifiesto.origenGrabacion === 'directa') &&
     esSnowflake(manifiesto.guildId) &&
     (manifiesto.estado === 'ESPERANDO CONSENTIMIENTO' ||
       manifiesto.estado === 'GRABANDO' ||

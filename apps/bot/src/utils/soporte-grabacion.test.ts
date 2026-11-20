@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import {
   crearConsentimientosPendientes,
+  coincidenParticipantesGrabacion,
   estaDentroDeVolumenMontado,
   guardarManifiestoGrabacion,
   leerManifiestoGrabacion,
@@ -32,6 +33,13 @@ test('exige consentimiento individual de cada participante', () => {
     actualizadoEn: new Date().toISOString(),
   })
   assert.equal(todosAceptaronConsentimiento(consentimientos), false)
+})
+
+test('cancela el inicio si cambia la lista de participantes después del consentimiento', () => {
+  assert.equal(coincidenParticipantesGrabacion(['a', 'b'], ['b', 'a']), true)
+  assert.equal(coincidenParticipantesGrabacion(['a', 'b'], ['a']), false)
+  assert.equal(coincidenParticipantesGrabacion(['a', 'b'], ['a', 'b', 'c']), false)
+  assert.equal(coincidenParticipantesGrabacion(['a', 'b'], ['a', 'c']), false)
 })
 
 test('conserva el paquete PCM completo cuando llega antes por jitter de red', () => {

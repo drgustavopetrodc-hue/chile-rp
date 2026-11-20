@@ -2874,6 +2874,10 @@ async function ejecutarRetencionGrabaciones(client: Client): Promise<void> {
     try {
       const registro = await leerRegistroSoporte(manifiesto.soporteId)
       if (!registro) {
+        if (manifiesto.origenGrabacion === 'directa') {
+          await eliminarArchivosGrabacion(config.grabaciones.directorio, manifiesto.soporteId)
+          continue
+        }
         console.error(`[Soporte ${manifiesto.soporteId}] No se elimina una grabación vencida sin expediente de auditoría.`)
         continue
       }
