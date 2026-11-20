@@ -120,12 +120,20 @@ test('las grabaciones de soporte se publican en ambos canales institucionales de
   assert.match(fuente, /publicarGrabacionEnLogs/)
 })
 
-test('cada entrada humana de soporte reproduce el saludo institucional', async () => {
+test('cada entrada humana a Asistencia Staff reproduce el saludo institucional', async () => {
+  const fuente = await readFile(
+    join(process.cwd(), 'src', 'commands', 'servicio-staff.ts'),
+    'utf8',
+  )
+  assert.match(fuente, /nuevo\.channelId === grabacionEnCanal\.canal\.id/)
+  assert.match(fuente, /await anunciarBienvenidaAsistencia/)
+  assert.match(fuente, /responsable\.miembro\.displayName/)
+})
+
+test('el anuncio institucional no se reproduce al entrar al canal de soporte', async () => {
   const fuente = await readFile(
     join(process.cwd(), 'src', 'commands', 'soporte.ts'),
     'utf8',
   )
-  assert.match(fuente, /if \(entro\) \{\s*await anunciarBienvenidaSoporte/)
-  assert.match(fuente, /responsable\.displayName/)
-  assert.match(fuente, /bienvenida_usuario/)
+  assert.doesNotMatch(fuente, /anunciarBienvenidaSoporte/)
 })

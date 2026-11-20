@@ -59,8 +59,10 @@ import {
 import { parsearIdsDiscord } from '../utils/servicio-staff-modelo'
 import { reservarCapturaVoz, liberarCapturaVoz } from '../utils/registro-captura-voz'
 import {
+  construirBienvenidaSoporte,
   ParticipantesSoporte,
   puedeIniciarSoporte,
+  tituloResponsableSoporte,
   validarParticipantesSoporte,
 } from '../utils/soporte'
 import { crearSoporteDesdePanelPrivado } from './soporte'
@@ -324,6 +326,7 @@ async function procesarCambioVozServicio(anterior: VoiceState, nuevo: VoiceState
     anterior.channelId !== nuevo.channelId
   ) {
     await agregarParticipanteServicio(nuevo, grabacionEnCanal)
+    await anunciarBienvenidaAsistencia(nuevo.guild, grabacionEnCanal.canal)
   }
 
   const servicio = await obtenerServicioEnCurso(nuevo.guild.id, nuevo.id)
@@ -513,9 +516,23 @@ async function iniciarOAsociarGrabacion(
         iniciadaEn: new Date(),
         finalizando: false,
       }
+      const tituloInicial = tituloResponsableSoporte(
+        miembro.permissions.has(PermissionFlagsBits.Administrator),
+        [...miembro.roles.cache.keys()],
+        {
+          fundador: config.roles.fundacion,
+          juntaAdministrativa: config.roles.juntaAdministrativa,
+          admin: config.roles.admin,
+          moderador: config.roles.moderador,
+        },
+      )
+      const bienvenidaInicial = construirBienvenidaSoporte(
+        miembro.displayName,
+        tituloInicial,
+      ).replace('Bienvenido al soporte oficial', 'Bienvenido al canal de Asistencia Staff oficial')
       await reproducirAnuncioSoporte(
         canal,
-        `Atención. Se inicia el servicio de Staff de ${servicio.staffNombre}. Este canal de voz está siendo grabado.`,
+        `${bienvenidaInicial} Atención. Se inicia el servicio de Staff de ${servicio.staffNombre}. Este canal de voz está siendo grabado.`,
         grabador.conexion,
       )
       const inicioCaptura = new Date()
@@ -575,6 +592,50 @@ async function iniciarOAsociarGrabacion(
     }
   }
   await actualizarPanelPorId(guild.client, servicio.id)
+}
+
+async function anunciarBienvenidaAsistencia(guild: Guild, canal: VoiceChannel): Promise<void> {
+  const miembros = [...canal.members.values()].filter((miembro) => !miembro.user.bot)
+  if (!miembros.length) return
+
+  const responsable = miembros
+    .map((miembro) => {
+      const roles = [...miembro.roles.cache.keys()]
+      const tieneAdministrador = miembro.permissions.has(PermissionFlagsBits.Administrator)
+      let prioridad = 5
+      if (config.roles.fundacion && roles.includes(config.roles.fundacion)) prioridad = 1
+      else if (config.roles.juntaAdministrativa && roles.includes(config.roles.juntaAdministrativa)) prioridad = 2
+      else if (tieneAdministrador || (config.roles.admin && roles.includes(config.roles.admin))) prioridad = 3
+      else if (config.roles.moderador && roles.includes(config.roles.moderador)) prioridad = 4
+      else if (config.roles.staff && roles.includes(config.roles.staff)) prioridad = 5
+      else prioridad = 6
+      return { miembro, prioridad, tieneAdministrador, roles }
+    })
+    .filter(({ prioridad }) => prioridad <= 5)
+    .sort((a, b) => a.prioridad - b.prioridad)[0]
+
+  if (!responsable) return
+  const titulo = tituloResponsableSoporte(
+    responsable.tieneAdministrador,
+    responsable.roles,
+    {
+      fundador: config.roles.fundacion,
+      juntaAdministrativa: config.roles.juntaAdministrativa,
+      admin: config.roles.admin,
+      moderador: config.roles.moderador,
+    },
+  )
+  const grabacion = grabacionesAsistencia.get(guild.id)
+  await reproducirAnuncioSoporte(
+    canal,
+    construirBienvenidaSoporte(responsable.miembro.displayName, titulo).replace(
+      'Bienvenido al soporte oficial',
+      'Bienvenido al canal de Asistencia Staff oficial',
+    ),
+    grabacion?.grabador.conexion,
+  ).catch((error: unknown) => {
+    console.error(`[Servicio Staff ${grabacion?.id ?? 'sin-id'}] No se pudo anunciar la bienvenida:`, error)
+  })
 }
 
 async function agregarParticipanteServicio(
