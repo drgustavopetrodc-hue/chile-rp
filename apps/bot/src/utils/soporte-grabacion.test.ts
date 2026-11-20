@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process'
 import {
   crearConsentimientosPendientes,
   coincidenParticipantesGrabacion,
+  esErrorDAVE,
   estaDentroDeVolumenMontado,
   guardarManifiestoGrabacion,
   leerManifiestoGrabacion,
@@ -20,6 +21,12 @@ import {
   todosAceptaronConsentimiento,
   verificarOgg,
 } from './soporte-grabacion'
+
+test('clasifica los errores DAVE de descifrado como recuperables', () => {
+  const error = new Error('Failed to decrypt: DecryptionFailed(UnencryptedWhenPassthroughDisabled)')
+  assert.equal(esErrorDAVE(error), true)
+  assert.equal(esErrorDAVE(new Error('El volumen de grabación no tiene espacio')), false)
+})
 
 test('exige consentimiento individual de cada participante', () => {
   const consentimientos = crearConsentimientosPendientes(['100000000000000001', '100000000000000001'])

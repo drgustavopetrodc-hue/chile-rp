@@ -99,6 +99,17 @@ const espacioMinimoBytes = 128 * 1024 * 1024
 export const limitePistasGrabacion = 10
 const duracionEsperaVozMs = 45_000
 
+export function esErrorDAVE(error: Error): boolean {
+  const detalle = `${error.name} ${error.message}`.toLowerCase()
+  return detalle.includes('decryptionfailed') ||
+    detalle.includes('failed to decrypt') ||
+    detalle.includes('unencryptedwhenpassthroughdisabled')
+}
+
+function esperarReconexionVoz(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 export function planificarPaquetePcm(
   pcm: Buffer,
   cursorMuestras: number,
@@ -257,17 +268,21 @@ export async function prepararDirectorioGrabacion(
 export class GrabadorSoporte {
   readonly directorio: string
   readonly manifiesto: ManifiestoGrabacionSoporte
-  readonly conexion: VoiceConnection
+  conexion: VoiceConnection
   private readonly flujoPorUsuario = new Map<string, PistaActiva>()
   private readonly pistaPorUsuario = new Map<string, CodificadorPista>()
   private readonly operacionesAudioBot = new Set<Promise<void>>()
   private readonly conexionError: (error: Error) => void
   private readonly primerPaquete: (discordId: string) => void | Promise<void>
   private readonly retencionDiasConfigurada: number
+  private readonly guild: Guild
+  private readonly canalVoz: VoiceChannel
   private inicioMonotono: number | undefined
   private capturaActiva = false
   private finalizando = false
   private ultimoChequeoEspacio = 0
+  private reconectando = false
+  private reconexionPromise: Promise<void> | undefined
 
   private constructor(
     directorio: string,
@@ -276,6 +291,8 @@ export class GrabadorSoporte {
     retencionDias: number,
     conexionError: (error: Error) => void,
     primerPaquete: (discordId: string) => void | Promise<void>,
+    guild: Guild,
+    canalVoz: VoiceChannel,
   ) {
     this.directorio = directorio
     this.manifiesto = manifiesto
@@ -283,16 +300,80 @@ export class GrabadorSoporte {
     this.retencionDiasConfigurada = retencionDias
     this.conexionError = conexionError
     this.primerPaquete = primerPaquete
+    this.guild = guild
+    this.canalVoz = canalVoz
+    this.instalarEscuchaConexion()
+  }
+
+  private instalarEscuchaConexion(): void {
     this.conexion.on('error', (error) => {
       if (this.finalizando) return
+      if (esErrorDAVE(error)) {
+        void this.reconectarDespuesDeErrorDAVE(error)
+        return
+      }
       this.conexionError(error)
     })
     this.conexion.on('stateChange', (_anterior, siguiente) => {
-      if (this.finalizando || siguiente.status !== VoiceConnectionStatus.Disconnected) return
+      if (
+        this.finalizando ||
+        this.reconectando ||
+        siguiente.status !== VoiceConnectionStatus.Disconnected
+      ) return
       this.capturaActiva = false
       this.limpiarFlujos()
       this.conexionError(new Error('El bot perdió la conexión con el canal de voz del soporte.'))
     })
+  }
+
+  private reconectarDespuesDeErrorDAVE(error: Error): Promise<void> {
+    if (this.reconexionPromise) return this.reconexionPromise
+    this.reconexionPromise = (async () => {
+      for (let intento = 1; intento <= 3 && !this.finalizando; intento++) {
+        try {
+          await esperarReconexionVoz(intento === 1 ? 750 : intento * 1_500)
+          if (this.finalizando) return
+          this.reconectando = true
+          if (this.conexion.state.status === VoiceConnectionStatus.Destroyed) {
+            this.conexion = joinVoiceChannel({
+              channelId: this.canalVoz.id,
+              guildId: this.guild.id,
+              adapterCreator: this.guild.voiceAdapterCreator,
+              selfDeaf: false,
+              selfMute: false,
+            })
+            this.instalarEscuchaConexion()
+          } else {
+            const rejoin = this.conexion.rejoin({
+              channelId: this.canalVoz.id,
+              selfDeaf: false,
+              selfMute: false,
+            })
+            if (!rejoin) throw new Error('La conexión de voz no admitió reingresar al canal.')
+          }
+          await entersState(this.conexion, VoiceConnectionStatus.Ready, duracionEsperaVozMs)
+          this.reconectando = false
+          this.limpiarFlujos()
+          if (this.capturaActiva) {
+            await this.suscribir(this.manifiesto.participantes)
+          }
+          console.info(
+            `[Soporte ${this.manifiesto.soporteId}] Reconexión DAVE completada tras el intento ${intento}.`,
+          )
+          return
+        } catch (errorReconexion) {
+          this.reconectando = false
+          console.warn(
+            `[Soporte ${this.manifiesto.soporteId}] Falló la reconexión DAVE ${intento}/3:`,
+            errorReconexion,
+          )
+        }
+      }
+      if (!this.finalizando) this.conexionError(error)
+    })().finally(() => {
+      this.reconexionPromise = undefined
+    })
+    return this.reconexionPromise
   }
 
   get estaCapturando(): boolean {
@@ -356,6 +437,8 @@ export class GrabadorSoporte {
       retencionDias,
       callbacks.conexionError,
       callbacks.primerPaquete,
+      guild,
+      canalVoz,
     )
     try {
       await guardarManifiestoGrabacion(resolve(directorio, '..'), manifiesto)
