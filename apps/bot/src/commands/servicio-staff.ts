@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonInteraction,
   ButtonStyle,
@@ -62,7 +63,7 @@ import {
   puedeIniciarSoporte,
   validarParticipantesSoporte,
 } from '../utils/soporte'
-import { crearSoporteDesdePanelPrivado, hayGrabacionSoporteActiva } from './soporte'
+import { crearSoporteDesdePanelPrivado } from './soporte'
 
 const canalAsistenciaStaffId = '1571736084558258198'
 const canalInformeServicioId = '1573152199251591218'
@@ -409,14 +410,6 @@ async function iniciarOAsociarGrabacion(
     return
   }
   if (miembro.voice.channelId !== servicio.canalAsistenciaId) return
-  if (hayGrabacionSoporteActiva(guild.id)) {
-    await informarErrorInicio(
-      servicio,
-      guild,
-      'El bot está conectado a una grabación de soporte; se evitará abrir una conexión de voz duplicada.',
-    )
-    return
-  }
   const canal = await guild.channels.fetch(servicio.canalAsistenciaId)
   if (!canal || canal.type !== ChannelType.GuildVoice) {
     await informarErrorInicio(servicio, guild, 'No se encontró el canal de Asistencia Staff.')
@@ -717,6 +710,24 @@ async function finalizarGrabacionAsistencia(
       : finalizadoEn
     if (estadoDeseado === EstadoGrabacionServicioStaff.FINALIZADA && !resultado.mezclaPath) {
       estado = EstadoGrabacionServicioStaff.SIN_AUDIO
+    }
+    if (resultado.mezclaPath) {
+      await Promise.all([...grabacion.servicios].map(async (servicioId) => {
+        const servicio = await obtenerServicioStaff(servicioId)
+        if (!servicio) return
+        try {
+          const usuario = await grabacion.guild.client.users.fetch(servicio.staffDiscordId)
+          await usuario.send({
+            content: `Grabación finalizada del servicio Staff \`${servicio.id}\` en **${grabacion.canal.name}**.`,
+            files: [new AttachmentBuilder(resultado.mezclaPath!, {
+              name: `servicio-staff-${servicio.id}-mezcla.ogg`,
+            })],
+            allowedMentions: { parse: [] },
+          })
+        } catch (error) {
+          console.error(`[Servicio Staff ${servicio.id}] No se pudo enviar la grabación por DM:`, error)
+        }
+      }))
     }
   } catch (error) {
     estado = EstadoGrabacionServicioStaff.ERROR

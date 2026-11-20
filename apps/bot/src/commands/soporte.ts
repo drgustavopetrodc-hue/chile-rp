@@ -31,12 +31,14 @@ import { coloresEmbed, crearEmbed } from '../utils/embeds'
 import { comoComponentsV2 } from '../utils/components-v2'
 import { asegurarUsuario } from '../utils/usuarios'
 import {
+  construirBienvenidaSoporte,
   normalizarSufijoCanalSoporte,
   obtenerIdsAccesoSoporte,
   obtenerIdsUsuariosParaMover,
   puedeEliminarTrasRetirarConsentimiento,
   puedeIniciarSoporte,
   crearPermisosCanalSoporte,
+  tituloResponsableSoporte,
   validarParticipantesSoporte,
 } from '../utils/soporte'
 import type { ParticipantesSoporte, PermisoCanalSoporte, SeleccionGrupoSoporte } from '../utils/soporte'
@@ -964,6 +966,33 @@ function esPersonalAutorizado(miembro: GuildMember): boolean {
   )
 }
 
+async function anunciarBienvenidaSoporte(
+  guild: Guild,
+  registro: RegistroSoporte,
+): Promise<void> {
+  try {
+    const responsable = await guild.members.fetch(registro.ejecutorId)
+    const titulo = tituloResponsableSoporte(
+      responsable.permissions.has(PermissionFlagsBits.Administrator),
+      [...responsable.roles.cache.keys()],
+      {
+        fundador: config.roles.fundacion,
+        juntaAdministrativa: config.roles.juntaAdministrativa,
+        admin: config.roles.admin,
+        moderador: config.roles.moderador,
+      },
+    )
+    await anunciarEnSoporte(
+      guild,
+      registro,
+      construirBienvenidaSoporte(responsable.displayName, titulo),
+      'bienvenida_usuario',
+    )
+  } catch (error) {
+    console.error(`[Soporte ${registro.id}] No se pudo preparar el saludo de bienvenida:`, error)
+  }
+}
+
 async function validarRolesSupervision(guild: Guild): Promise<string[]> {
   const ids = [...new Set([
     config.roles.staff,
@@ -1526,9 +1555,14 @@ async function manejarConsentimientoGrabacion(
         console.error(`[Soporte ${soporteId}] No se pudo detener tras fallar el registro de consentimiento:`, errorInterno)
       })
     }
-    return i.followUp({
+    await i.followUp({
       content: 'No se pudo guardar el consentimiento de forma segura. La grabación se detuvo; el soporte puede continuar sin grabación.',
       flags: efimero,
+    }).catch((errorRespuesta: unknown) => {
+      const codigo = typeof errorRespuesta === 'object' && errorRespuesta !== null && 'code' in errorRespuesta
+        ? (errorRespuesta as { code?: number }).code
+        : undefined
+      if (![10003, 10008, 10062].includes(codigo ?? 0)) throw errorRespuesta
     })
   })
 }
@@ -1670,6 +1704,7 @@ export async function manejarEstadoVozSoporte(
       if (!grabador) return
 
       if (entro) {
+        await anunciarBienvenidaSoporte(estadoNuevo.guild, registro)
         let consentimiento = registro.consentimientos.find(({ discordId }) => discordId === miembro.id)
         if (!consentimiento) {
           if (registro.consentimientos.length >= limitePistasGrabacion) {

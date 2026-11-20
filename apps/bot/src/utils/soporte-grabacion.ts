@@ -325,18 +325,26 @@ export class GrabadorSoporte {
     this.conexion.on('stateChange', (_anterior, siguiente) => {
       if (
         this.finalizando ||
-        this.reconectando ||
         siguiente.status !== VoiceConnectionStatus.Disconnected
       ) return
-      this.capturaActiva = false
-      this.limpiarFlujos()
-      this.conexionError(new Error('El bot perdió la conexión con el canal de voz del soporte.'))
+      void this.reconectarDespuesDeErrorVoz(
+        new Error('El bot perdió la conexión con el canal de voz del soporte.'),
+      )
     })
   }
 
+  private reconectarDespuesDeErrorVoz(error: Error): Promise<void> {
+    return this.reconexionPromise ?? this.reconectarDespuesDeError(error)
+  }
+
   private reconectarDespuesDeErrorDAVE(error: Error): Promise<void> {
+    return this.reconectarDespuesDeError(error)
+  }
+
+  private reconectarDespuesDeError(error: Error): Promise<void> {
     if (this.reconexionPromise) return this.reconexionPromise
     this.reconexionPromise = (async () => {
+      const debiaCapturar = this.capturaActiva
       for (let intento = 1; intento <= 3 && !this.finalizando; intento++) {
         try {
           await esperarReconexionVoz(intento === 1 ? 750 : intento * 1_500)
@@ -362,7 +370,8 @@ export class GrabadorSoporte {
           await entersState(this.conexion, VoiceConnectionStatus.Ready, duracionEsperaVozMs)
           this.reconectando = false
           this.limpiarFlujos()
-          if (this.capturaActiva) {
+          this.capturaActiva = debiaCapturar
+          if (debiaCapturar) {
             await this.suscribir(this.manifiesto.participantes)
           }
           console.info(
@@ -377,7 +386,11 @@ export class GrabadorSoporte {
           )
         }
       }
-      if (!this.finalizando) this.conexionError(error)
+      if (!this.finalizando) {
+        this.capturaActiva = false
+        this.limpiarFlujos()
+        this.conexionError(error)
+      }
     })().finally(() => {
       this.reconexionPromise = undefined
     })

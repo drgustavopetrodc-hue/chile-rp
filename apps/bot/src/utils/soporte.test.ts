@@ -10,16 +10,42 @@ import {
 } from 'discord.js'
 import { comoComponentsV2 } from './components-v2'
 import {
+  construirBienvenidaSoporte,
   crearPermisosCanalSoporte,
   normalizarSufijoCanalSoporte,
   obtenerIdsAccesoSoporte,
   obtenerIdsUsuariosParaMover,
   puedeEliminarTrasRetirarConsentimiento,
   puedeIniciarSoporte,
+  tituloResponsableSoporte,
   validarParticipantesSoporte,
 } from './soporte'
 
 const grupoVacio = { usuarios: [] }
+
+test('identifica el cargo visible del responsable y construye la bienvenida', () => {
+  assert.equal(tituloResponsableSoporte(false, ['fundador'], {
+    fundador: 'fundador',
+    juntaAdministrativa: 'junta',
+    admin: 'admin',
+    moderador: 'moderador',
+  }), 'el fundador')
+  assert.equal(tituloResponsableSoporte(false, ['junta'], {
+    fundador: 'fundador',
+    juntaAdministrativa: 'junta',
+    admin: 'admin',
+    moderador: 'moderador',
+  }), 'un miembro de la junta directiva')
+  assert.equal(tituloResponsableSoporte(true, ['staff'], {
+    admin: 'admin',
+    moderador: 'moderador',
+  }), 'el administrador')
+
+  const texto = construirBienvenidaSoporte('Nombre Apellido', 'el moderador')
+  assert.match(texto, /Bienvenido al soporte oficial de Chile RP/)
+  assert.match(texto, /el moderador Nombre Apellido/)
+  assert.match(texto, /una buena atención/)
+})
 
 test('exige reportantes y reportados, pero permite omitir testigos', () => {
   assert.match(

@@ -135,7 +135,7 @@ client.on(Events.InteractionCreate, async (i) => {
     const codigoDiscord = typeof err === 'object' && err !== null && 'code' in err
       ? (err as { code?: number }).code
       : undefined
-    if (codigoDiscord === 10008 || codigoDiscord === 10062) {
+    if (codigoDiscord === 10003 || codigoDiscord === 10008 || codigoDiscord === 10062) {
       return
     }
     if (i.isRepliable()) {

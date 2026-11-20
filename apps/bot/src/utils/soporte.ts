@@ -29,6 +29,49 @@ export function puedeIniciarSoporte(
   ].some((id) => !!id && rolesMiembro.includes(id))
 }
 
+export function tituloResponsableSoporte(
+  tienePermisoAdministrador: boolean,
+  rolesMiembro: readonly string[],
+  rolesInstitucionales: {
+    fundador?: string
+    juntaAdministrativa?: string
+    admin?: string
+    moderador?: string
+  },
+): string {
+  if (rolesInstitucionales.fundador && rolesMiembro.includes(rolesInstitucionales.fundador)) {
+    return 'el fundador'
+  }
+  if (
+    rolesInstitucionales.juntaAdministrativa &&
+    rolesMiembro.includes(rolesInstitucionales.juntaAdministrativa)
+  ) {
+    return 'un miembro de la junta directiva'
+  }
+  if (
+    tienePermisoAdministrador ||
+    (rolesInstitucionales.admin && rolesMiembro.includes(rolesInstitucionales.admin))
+  ) {
+    return 'el administrador'
+  }
+  if (rolesInstitucionales.moderador && rolesMiembro.includes(rolesInstitucionales.moderador)) {
+    return 'el moderador'
+  }
+  return 'un miembro del Staff'
+}
+
+export function construirBienvenidaSoporte(
+  nombreResponsable: string,
+  tituloResponsable: string,
+): string {
+  const nombreSeguro = nombreResponsable
+    .replace(/[\r\n\t]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80) || 'un miembro del Staff'
+  return `Bienvenido al soporte oficial de Chile RP. Te comunicas con ${tituloResponsable} ${nombreSeguro}. Esperamos que tengas una buena atención.`
+}
+
 export function validarGrupoSoporte(
   grupo: SeleccionGrupoSoporte,
   opciones: { requerido: boolean; permiteRol: boolean; etiqueta: string },

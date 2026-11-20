@@ -58,7 +58,74 @@ test('la reconexión limpia suscripciones antes de recrearlas', async () => {
     'utf8',
   )
   assert.match(fuente, /reconexionPromise/)
+  assert.match(fuente, /reconectarDespuesDeErrorVoz/)
   assert.match(fuente, /this\.limpiarFlujos\(\)/)
   assert.match(fuente, /await this\.suscribir\(this\.manifiesto\.participantes\)/)
+  assert.match(fuente, /const debiaCapturar = this\.capturaActiva/)
   assert.doesNotMatch(fuente, /daveEncryption:\s*false/)
+})
+
+test('el cierre WebSocket inicia reconexión sin finalizar por el estado Disconnected', async () => {
+  const fuente = await readFile(
+    join(process.cwd(), 'src', 'utils', 'soporte-grabacion.ts'),
+    'utf8',
+  )
+  assert.match(
+    fuente,
+    /siguiente\.status !== VoiceConnectionStatus\.Disconnected[\s\S]*reconectarDespuesDeErrorVoz/,
+  )
+  assert.doesNotMatch(
+    fuente.slice(fuente.indexOf('stateChange'), fuente.indexOf('reconectarDespuesDeErrorVoz')),
+    /this\.conexionError\(new Error/,
+  )
+})
+
+test('el manejador global ignora canales e interacciones Discord desconocidos', async () => {
+  const fuente = await readFile(
+    join(process.cwd(), 'src', 'index.ts'),
+    'utf8',
+  )
+  assert.match(fuente, /codigoDiscord === 10003/)
+  assert.match(fuente, /codigoDiscord === 10008/)
+  assert.match(fuente, /codigoDiscord === 10062/)
+})
+
+test('Servicio Staff no bloquea inicio por soportes activos en otro canal', async () => {
+  const fuente = await readFile(
+    join(process.cwd(), 'src', 'commands', 'servicio-staff.ts'),
+    'utf8',
+  )
+  assert.doesNotMatch(fuente, /hayGrabacionSoporteActiva/)
+  assert.match(fuente, /reservarCapturaVoz\(canal\.id, grabacionId\)/)
+})
+
+test('Servicio Staff entrega la mezcla final por DM antes de conservar las referencias', async () => {
+  const fuente = await readFile(
+    join(process.cwd(), 'src', 'commands', 'servicio-staff.ts'),
+    'utf8',
+  )
+  assert.match(fuente, /usuario\.send/)
+  assert.match(fuente, /servicio-staff-\$\{servicio\.id\}-mezcla\.ogg/)
+  assert.match(fuente, /resultado\.mezclaPath/)
+})
+
+test('las grabaciones de soporte se publican en ambos canales institucionales de logs', async () => {
+  const fuente = await readFile(
+    join(process.cwd(), 'src', 'commands', 'soporte.ts'),
+    'utf8',
+  )
+  assert.match(fuente, /config\.canales\.logModeracion/)
+  assert.match(fuente, /config\.canales\.logAdministracion/)
+  assert.match(fuente, /soporte-\$\{registro\.id\}-mezcla\.ogg/)
+  assert.match(fuente, /publicarGrabacionEnLogs/)
+})
+
+test('cada entrada humana de soporte reproduce el saludo institucional', async () => {
+  const fuente = await readFile(
+    join(process.cwd(), 'src', 'commands', 'soporte.ts'),
+    'utf8',
+  )
+  assert.match(fuente, /if \(entro\) \{\s*await anunciarBienvenidaSoporte/)
+  assert.match(fuente, /responsable\.displayName/)
+  assert.match(fuente, /bienvenida_usuario/)
 })
