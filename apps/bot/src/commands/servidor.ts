@@ -15,7 +15,7 @@ import {
 import { fileURLToPath } from 'node:url'
 import { db } from '@rp-chile/db'
 import { crearEmbed, coloresEmbed } from '../utils/embeds'
-import { enviarComponentsV2 } from '../utils/components-v2'
+import { editarComponentsV2, enviarComponentsV2 } from '../utils/components-v2'
 
 const efimero = MessageFlags.Ephemeral
 const reglasPorDefecto = 'Respeta las reglas del servidor, mantén el rol y trata a los demás con respeto.'
@@ -81,7 +81,7 @@ async function ejecutarApertura(i: ChatInputCommandInteraction) {
     const minutosRestantes = Math.ceil(Math.max(0, plazoMs - (Date.now() - inicio)) / 60_000)
     await boton.deferUpdate()
     actualizacionVotos = actualizacionVotos.then(async () => {
-      await mensaje.edit({
+      await editarComponentsV2(mensaje, {
         embeds: [crearEmbedVotacionApertura(meta, favor, contra, minutosRestantes)],
         components: [botones()],
         attachments: [...mensaje.attachments.keys()].map((id) => ({ id })),
@@ -97,7 +97,7 @@ async function ejecutarApertura(i: ChatInputCommandInteraction) {
     const contra = votos.size - favor
     const abierto = motivo === 'meta' && favor >= meta
     if (abierto) await guardarEstado(true, 'Votación aprobada')
-    await mensaje.edit({
+    await editarComponentsV2(mensaje, {
       embeds: [crearEmbedVotacionApertura(meta, favor, contra, 0, abierto ? 'aprobada' : 'finalizada')],
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(siId).setLabel('Votación finalizada').setStyle(ButtonStyle.Secondary).setDisabled(true),
