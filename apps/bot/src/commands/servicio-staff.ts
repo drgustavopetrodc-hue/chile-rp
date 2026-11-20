@@ -435,13 +435,11 @@ async function iniciarOAsociarGrabacion(
       .map((persona) => persona.id),
     staffId,
   ])]
-  if (!participantes.length || participantes.length > limitePistasGrabacion) {
+  if (!participantes.length) {
     await informarErrorInicio(
       servicio,
       guild,
-      participantes.length
-        ? `La grabación admite hasta ${limitePistasGrabacion} pistas; hay ${participantes.length} personas en el canal.`
-        : 'No se encontraron participantes humanos en el canal para iniciar la captura.',
+      'No se encontraron participantes humanos en el canal para iniciar la captura.',
     )
     return
   }
@@ -670,25 +668,19 @@ async function notificarYAgregarParticipante(
   if (grabacion.participantes.has(participanteId) || grabacion.finalizando) return
   const miembro = await grabacion.guild.members.fetch(participanteId)
   if (miembro.user.bot || miembro.voice.channelId !== grabacion.canal.id) return
-  const puedeAgregarPista = grabacion.participantes.size < limitePistasGrabacion
-  const aviso = puedeAgregarPista
-    ? `Aviso: el canal **${grabacion.canal.name}** está siendo grabado como parte de un servicio Staff. Si permaneces, tu voz se incluirá desde ahora.`
-    : `Aviso: el canal **${grabacion.canal.name}** está siendo grabado, pero se alcanzó el límite de ${limitePistasGrabacion} pistas; tu voz no se incluirá.`
+  const aviso = `Aviso: el canal **${grabacion.canal.name}** está siendo grabado como parte de un servicio Staff. Si permaneces, tu voz se incluirá desde ahora.`
   try {
     await miembro.send({ content: aviso, allowedMentions: { parse: [] } })
   } catch (error) {
     console.error(`[Servicio Staff ${grabacion.id}] No se notificó por DM a ${miembro.id}; su pista no se incluirá:`, error)
     return
   }
-  if (!puedeAgregarPista) return
-
   const miembroActual = await grabacion.guild.members.fetch(miembro.id)
   if (
     miembroActual.voice.channelId !== grabacion.canal.id ||
     grabacionesAsistencia.get(grabacion.guild.id) !== grabacion ||
     grabacion.finalizando ||
-    grabacion.participantes.has(miembro.id) ||
-    grabacion.participantes.size >= limitePistasGrabacion
+    grabacion.participantes.has(miembro.id)
   ) return
 
   grabacion.participantes.add(miembro.id)

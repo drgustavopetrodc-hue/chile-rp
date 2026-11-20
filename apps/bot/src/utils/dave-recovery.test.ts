@@ -150,3 +150,22 @@ test('el anuncio institucional no se reproduce al entrar al canal de soporte', a
   )
   assert.doesNotMatch(fuente, /anunciarBienvenidaSoporte/)
 })
+
+test('Asistencia Staff elimina el límite de pistas pero soporte y directa lo conservan', async () => {
+  const grabador = await readFile(
+    join(process.cwd(), 'src', 'utils', 'soporte-grabacion.ts'),
+    'utf8',
+  )
+  assert.match(
+    grabador,
+    /origenGrabacion !== 'servicio-staff'[\s\S]*cantidadTotal > limitePistasGrabacion/,
+  )
+
+  const staff = await readFile(
+    join(process.cwd(), 'src', 'commands', 'servicio-staff.ts'),
+    'utf8',
+  )
+  assert.doesNotMatch(staff, /participantes\.length > limitePistasGrabacion/)
+  assert.doesNotMatch(staff, /participantes\.size >= limitePistasGrabacion/)
+  assert.doesNotMatch(staff, /se alcanzó el límite/)
+})

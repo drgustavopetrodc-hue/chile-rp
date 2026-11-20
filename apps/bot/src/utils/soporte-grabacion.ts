@@ -646,7 +646,10 @@ export class GrabadorSoporte {
   private async suscribir(discordIds: readonly string[]): Promise<void> {
     const ids = [...new Set(discordIds)].filter((id) => !this.flujoPorUsuario.has(id))
     const cantidadTotal = new Set([...this.pistaPorUsuario.keys(), ...ids]).size
-    if (cantidadTotal > limitePistasGrabacion) {
+    if (
+      this.manifiesto.origenGrabacion !== 'servicio-staff' &&
+      cantidadTotal > limitePistasGrabacion
+    ) {
       throw new Error(`La grabación excede el máximo seguro de ${limitePistasGrabacion} pistas individuales.`)
     }
     for (const discordId of ids) {
