@@ -143,6 +143,18 @@ test('cada entrada humana a Asistencia Staff reproduce el saludo institucional',
   assert.match(fuente, /if \(bienvenidasAsistenciaEnCurso\.has\(clave\)\) return/)
 })
 
+test('el saludo Staff usa solo responsables con servicio activo', async () => {
+  const fuente = await readFile(
+    join(process.cwd(), 'src', 'commands', 'servicio-staff.ts'),
+    'utf8',
+  )
+  assert.match(fuente, /obtenerServiciosEnCurso\(guild\.id\)/)
+  assert.match(fuente, /servicio\.estado === EstadoServicioStaff\.ACTIVO/)
+  assert.match(fuente, /servicio\.canalAsistenciaId === canal\.id/)
+  assert.match(fuente, /miembro\.voice\.channelId !== canal\.id/)
+  assert.doesNotMatch(fuente, /const miembros = \[\.\.\.canal\.members\.values/)
+})
+
 test('el anuncio institucional no se reproduce al entrar al canal de soporte', async () => {
   const fuente = await readFile(
     join(process.cwd(), 'src', 'commands', 'soporte.ts'),

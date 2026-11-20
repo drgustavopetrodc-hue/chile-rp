@@ -604,29 +604,46 @@ async function anunciarBienvenidaAsistencia(
   const clave = `${guild.id}:${canal.id}:${usuarioId}`
   if (bienvenidasAsistenciaEnCurso.has(clave)) return
   bienvenidasAsistenciaEnCurso.add(clave)
-  const miembros = [...canal.members.values()].filter((miembro) => !miembro.user.bot)
-  if (!miembros.length) return
+  const serviciosActivos = await obtenerServiciosEnCurso(guild.id)
+  const responsables = (
+    await Promise.all(serviciosActivos
+      .filter((servicio) =>
+        servicio.estado === EstadoServicioStaff.ACTIVO &&
+        servicio.canalAsistenciaId === canal.id,
+      )
+      .map(async (servicio) => {
+        const miembro = await guild.members.fetch(servicio.staffDiscordId).catch(() => null)
+        if (!miembro || miembro.user.bot || miembro.voice.channelId !== canal.id) return null
+        const roles = [...miembro.roles.cache.keys()]
+        const tieneAdministrador = miembro.permissions.has(PermissionFlagsBits.Administrator)
+        let prioridad = 5
+        if (config.roles.fundacion && roles.includes(config.roles.fundacion)) prioridad = 1
+        else if (config.roles.juntaAdministrativa && roles.includes(config.roles.juntaAdministrativa)) prioridad = 2
+        else if (tieneAdministrador || (config.roles.admin && roles.includes(config.roles.admin))) prioridad = 3
+        else if (config.roles.moderador && roles.includes(config.roles.moderador)) prioridad = 4
+        else if (config.roles.staff && roles.includes(config.roles.staff)) prioridad = 5
+        else prioridad = 6
+        return { miembro, prioridad, tieneAdministrador, roles }
+      }))
+  )
+    .filter((responsable): responsable is NonNullable<typeof responsable> => responsable !== null && responsable.prioridad <= 5)
+    .sort((a, b) => a.prioridad - b.prioridad)
 
-  const responsable = miembros
-    .map((miembro) => {
-      const roles = [...miembro.roles.cache.keys()]
-      const tieneAdministrador = miembro.permissions.has(PermissionFlagsBits.Administrator)
-      let prioridad = 5
-      if (config.roles.fundacion && roles.includes(config.roles.fundacion)) prioridad = 1
-      else if (config.roles.juntaAdministrativa && roles.includes(config.roles.juntaAdministrativa)) prioridad = 2
-      else if (tieneAdministrador || (config.roles.admin && roles.includes(config.roles.admin))) prioridad = 3
-      else if (config.roles.moderador && roles.includes(config.roles.moderador)) prioridad = 4
-      else if (config.roles.staff && roles.includes(config.roles.staff)) prioridad = 5
-      else prioridad = 6
-      return { miembro, prioridad, tieneAdministrador, roles }
+  if (!responsables.length) {
+    await reproducirAnuncioSoporte(
+      canal,
+      'Bienvenido al canal de Asistencia Staff oficial de Chile RP. Esperamos que tengas una buena atención.',
+      grabacionesAsistencia.get(guild.id)?.grabador.conexion,
+    ).catch((error: unknown) => {
+      console.error('[Servicio Staff] No se pudo anunciar la bienvenida sin responsable activo:', error)
     })
-    .filter(({ prioridad }) => prioridad <= 5)
-    .sort((a, b) => a.prioridad - b.prioridad)[0]
+    return
+  }
 
-  if (!responsable) return
+  const responsablePrincipal = responsables[0]
   const titulo = tituloResponsableSoporte(
-    responsable.tieneAdministrador,
-    responsable.roles,
+    responsablePrincipal.tieneAdministrador,
+    responsablePrincipal.roles,
     {
       fundador: config.roles.fundacion,
       juntaAdministrativa: config.roles.juntaAdministrativa,
@@ -634,13 +651,14 @@ async function anunciarBienvenidaAsistencia(
       moderador: config.roles.moderador,
     },
   )
+  const nombresResponsables = [...new Set(responsables.map(({ miembro }) => miembro.displayName))]
+  const responsablesTexto = nombresResponsables.length === 1
+    ? `${titulo} ${nombresResponsables[0]}`
+    : `${nombresResponsables.length > 1 ? 'los moderadores de turno' : titulo} ${nombresResponsables.join(' y ')}`
   const grabacion = grabacionesAsistencia.get(guild.id)
   await reproducirAnuncioSoporte(
     canal,
-    construirBienvenidaSoporte(responsable.miembro.displayName, titulo).replace(
-      'Bienvenido al soporte oficial',
-      'Bienvenido al canal de Asistencia Staff oficial',
-    ),
+    `Bienvenido al canal de Asistencia Staff oficial de Chile RP. Te comunicas con ${responsablesTexto}. Esperamos que tengas una buena atención.`,
     grabacion?.grabador.conexion,
   ).catch((error: unknown) => {
     console.error(`[Servicio Staff ${grabacion?.id ?? 'sin-id'}] No se pudo anunciar la bienvenida:`, error)
