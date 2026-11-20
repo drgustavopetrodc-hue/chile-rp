@@ -5,17 +5,23 @@ import {
   ButtonStyle,
   ChannelType,
   ChatInputCommandInteraction,
+  ContainerBuilder,
   InteractionContextType,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
   MessageFlags,
   NewsChannel,
   PermissionFlagsBits,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
   SlashCommandBuilder,
+  TextDisplayBuilder,
   TextChannel,
 } from 'discord.js'
 import { fileURLToPath } from 'node:url'
 import { db } from '@rp-chile/db'
 import { crearEmbed, coloresEmbed } from '../utils/embeds'
-import { editarComponentsV2, enviarComponentsV2 } from '../utils/components-v2'
+import { enviarComponentsV2 } from '../utils/components-v2'
 
 const efimero = MessageFlags.Ephemeral
 const reglasPorDefecto = 'Respeta las reglas del servidor, mantén el rol y trata a los demás con respeto.'
@@ -63,13 +69,13 @@ async function ejecutarApertura(i: ChatInputCommandInteraction) {
     new ButtonBuilder().setCustomId(noId).setLabel('Votar en contra').setStyle(ButtonStyle.Secondary),
   )
   await guardarEstado(false, 'Votación de apertura en curso')
-  const mensaje = await i.reply({
-    embeds: [crearEmbedVotacionApertura(meta, 0, 0, 30)],
-    components: [botones()],
+  await i.reply({
+    components: [crearContainerVotacionApertura(meta, 0, 0, 30, botones())],
+    flags: MessageFlags.IsComponentsV2,
     files: [new AttachmentBuilder(imagenApertura, { name: nombreImagenApertura })],
     allowedMentions: { parse: [] },
-    fetchReply: true,
   })
+  const mensaje = await i.fetchReply()
   const votos = new Map<string, boolean>()
   const collector = mensaje.createMessageComponentCollector({ time: plazoMs })
   let actualizacionVotos = Promise.resolve()
@@ -81,10 +87,10 @@ async function ejecutarApertura(i: ChatInputCommandInteraction) {
     const minutosRestantes = Math.ceil(Math.max(0, plazoMs - (Date.now() - inicio)) / 60_000)
     await boton.deferUpdate()
     actualizacionVotos = actualizacionVotos.then(async () => {
-      await editarComponentsV2(mensaje, {
-        embeds: [crearEmbedVotacionApertura(meta, favor, contra, minutosRestantes)],
-        components: [botones()],
-        attachments: [...mensaje.attachments.keys()].map((id) => ({ id })),
+      await mensaje.edit({
+        components: [crearContainerVotacionApertura(meta, favor, contra, minutosRestantes, botones())],
+        flags: MessageFlags.IsComponentsV2,
+        files: [new AttachmentBuilder(imagenApertura, { name: nombreImagenApertura })],
       })
     }).catch((error: unknown) => {
       console.error('[Servidor] No se pudo actualizar el conteo de la votación de apertura:', error)
@@ -97,12 +103,19 @@ async function ejecutarApertura(i: ChatInputCommandInteraction) {
     const contra = votos.size - favor
     const abierto = motivo === 'meta' && favor >= meta
     if (abierto) await guardarEstado(true, 'Votación aprobada')
-    await editarComponentsV2(mensaje, {
-      embeds: [crearEmbedVotacionApertura(meta, favor, contra, 0, abierto ? 'aprobada' : 'finalizada')],
-      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+    await mensaje.edit({
+      components: [crearContainerVotacionApertura(
+        meta,
+        favor,
+        contra,
+        0,
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(siId).setLabel('Votación finalizada').setStyle(ButtonStyle.Secondary).setDisabled(true),
+        ),
+        abierto ? 'aprobada' : 'finalizada',
       )],
-      attachments: [...mensaje.attachments.keys()].map((id) => ({ id })),
+      flags: MessageFlags.IsComponentsV2,
+      files: [new AttachmentBuilder(imagenApertura, { name: nombreImagenApertura })],
     }).catch((error: unknown) => {
       console.error('[Servidor] No se pudo actualizar el resultado de la votación de apertura:', error)
     })
@@ -110,13 +123,14 @@ async function ejecutarApertura(i: ChatInputCommandInteraction) {
   return undefined
 }
 
-function crearEmbedVotacionApertura(
+function crearContainerVotacionApertura(
   meta: number,
   favor: number,
   contra: number,
   minutosRestantes: number,
+  controles: ActionRowBuilder<ButtonBuilder>,
   resultado?: 'aprobada' | 'finalizada',
-) {
+): ContainerBuilder {
   const abierta = resultado === 'aprobada'
   const finalizada = resultado !== undefined
   const titulo = abierta
@@ -130,34 +144,34 @@ function crearEmbedVotacionApertura(
       ? 'La votación terminó sin alcanzar la meta. El servidor permanecerá cerrado.'
       : 'El equipo de moderación inició una votación para decidir la apertura del servidor.\n\n' +
         'Emite tu voto con los botones de abajo. Puedes cambiarlo mientras la votación siga activa.'
-  const embed = crearEmbed(
-    titulo,
-    `${descripcion}\n\nPor favor, espera el resultado de la votación y mantén un ambiente respetuoso para que todos disfrutemos la sesión.`,
-    finalizada ? (abierta ? coloresEmbed.exito : coloresEmbed.neutro) : coloresEmbed.aviso,
-  )
-    .setTitle(`━━━━━━━━━━━━━━━━━━━━\n${titulo}`)
-    .addFields(
-      { name: 'Votos requeridos', value: `A favor: **${meta}**`, inline: true },
-      { name: 'Resultado actual', value: `A favor: **${favor}**\nEn contra: **${contra}**`, inline: true },
+  const resumen = finalizada
+    ? `### Resultado\n${abierta
+      ? `Meta alcanzada: **${favor}/${meta} votos favorables**.`
+      : `No se alcanzó la meta: **${favor}/${meta} votos favorables**.`
+    }`
+    : `### Tiempo restante\nHasta **${minutosRestantes} min** para votar.`
+  const contenedor = new ContainerBuilder()
+    .setAccentColor(finalizada ? (abierta ? coloresEmbed.exito : coloresEmbed.neutro) : coloresEmbed.aviso)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent('**REPÚBLICA DE CHILE · ROLEPLAY**'))
+    .addSeparatorComponents(
+      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
     )
-    .setImage(`attachment://${nombreImagenApertura}`)
-
-  if (!finalizada) {
-    embed.addFields({
-      name: 'Tiempo restante',
-      value: `Hasta **${minutosRestantes} min** para votar.`,
-      inline: false,
-    })
-  } else {
-    embed.addFields({
-      name: 'Resultado',
-      value: abierta
-        ? `Meta alcanzada: **${favor}/${meta} votos favorables**.`
-        : `No se alcanzó la meta: **${favor}/${meta} votos favorables**.`,
-      inline: false,
-    })
-  }
-  return embed
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `## ${titulo}\n\n${descripcion}\n\n` +
+      'Por favor, espera el resultado de la votación y mantén un ambiente respetuoso para que todos disfrutemos la sesión.',
+    ))
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `### Votos requeridos\nA favor: **${meta}**\n\n` +
+      `### Resultado actual\nA favor: **${favor}**\nEn contra: **${contra}**\n\n${resumen}`,
+    ))
+    .addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL(`attachment://${nombreImagenApertura}`),
+      ),
+    )
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent('-# RP Chile · Sistema del servidor'))
+    .addActionRowComponents(controles)
+  return contenedor
 }
 
 async function cambiarEstado(i: ChatInputCommandInteraction, abierto: boolean) {
