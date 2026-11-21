@@ -12,7 +12,7 @@
     "bot:dev": "npm run dev -w @rp-chile/bot",
     "bot:start": "npm run start -w @rp-chile/bot",
     "bot:deploy-commands": "npm run deploy-commands -w @rp-chile/bot",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package && npm run db:generate"
   },
   "engines": {
     "node": ">=22.12.0"
