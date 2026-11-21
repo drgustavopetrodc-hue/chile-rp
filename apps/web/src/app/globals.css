@@ -184,6 +184,17 @@ button:focus-visible {
   font-weight: 700;
 }
 
+.login-button--discord {
+  border-color: #5865f2;
+  background: #5865f2;
+  color: #fff;
+  cursor: pointer;
+}
+
+.login-button--discord:hover {
+  background: #4752c4;
+}
+
 .login-button:disabled {
   cursor: not-allowed;
   opacity: 0.8;
@@ -191,6 +202,75 @@ button:focus-visible {
 
 .desktop-login {
   display: none;
+}
+
+.discord-mark {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.account-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--color-navy);
+}
+
+.account-control__avatar {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.account-control__fallback {
+  display: grid;
+  place-items: center;
+  background: var(--color-navy);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.account-control__name {
+  max-width: 9rem;
+  overflow: hidden;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logout-button {
+  display: grid;
+  width: 2.4rem;
+  height: 2.4rem;
+  place-items: center;
+  border: 1px solid var(--color-line);
+  border-radius: 0.2rem;
+  background: #fff;
+  color: var(--color-navy);
+  cursor: pointer;
+}
+
+.logout-button:hover {
+  border-color: var(--color-gold);
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.auth-error {
+  margin-block: 0 0.8rem;
+  color: #a12622;
+  font-size: 0.78rem;
 }
 
 .login-button__status {
@@ -242,6 +322,14 @@ button:focus-visible {
 .mobile-navigation__panel .login-button {
   width: 100%;
   margin-top: 0.85rem;
+}
+
+.mobile-navigation__panel .account-control {
+  justify-content: center;
+  width: 100%;
+  margin-top: 0.85rem;
+  border: 1px solid var(--color-line);
+  padding: 0.45rem;
 }
 
 .hero-section {
